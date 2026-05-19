@@ -1,0 +1,48 @@
+Generated
+
+# Archivos de compilación y resultados (Binarios)
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+
+# Archivos temporales de Visual Studio y carpetas de configuración
+.vs/
+.vscode/
+*.rsuser
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.csproj.user
+
+# Base de datos y archivos de caché de compilación
+*.cache
+*.opendb
+*.VC.db
+*.db
+
+# Carpeta de paquetes de NuGet y dependencias restauradas
+[Pp]ackages/
+*/[Pp]ackages/
+project.lock.json
+project.assets.json
+
+# Archivos de la herramienta de pruebas NCrunch
+*.ncrunch*
+*.crunch
+
+# Archivos de empaquetado de Nuget
+*.nupkg
+*.snupkg
+
+# Perfiles de publicacion y secretos
+*.pubxml
+*.azurePublishSettings
+secrets.json
+
+# Archivos de control de versiones del IDE
+vssver.scc
+
+# Ignorar resultados de compilación del CLI de .NET
+out/
