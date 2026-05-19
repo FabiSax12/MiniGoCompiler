@@ -12,8 +12,4 @@
     <PackageReference Include="LLVMSharp.Interop" Version="20.1.2" />
   </ItemGroup>
 
-  <ItemGroup>
-    <Folder Include="Generated\" />
-  </ItemGroup>
-
 </Project>
