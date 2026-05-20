@@ -1,0 +1,216 @@
+@startuml Lexer
+' ============================================================
+' MiniGo Compiler — Lexer/Scanner Architecture
+' Source code input → token stream output to parser
+' ============================================================
+
+skinparam packageStyle rectangle
+skinparam classBackgroundColor #F0F4F8
+skinparam packageBackgroundColor #E8ECF0
+skinparam noteBackgroundColor #FFFDE7
+skinparam arrowColor #37474F
+skinparam defaultFontSize 12
+
+title MiniGo Compiler — Lexer / Scanner Architecture\n
+
+' ============================================================
+' PACKAGE: Orchestration — Program.cs
+' ============================================================
+package "Program.cs\n(Orchestration)" #E3F2FD {
+    class "Main()" as Main <<entrypoint>> {
+    }
+}
+
+note bottom of Main
+    <b>Pipeline:</b>
+    1. File.ReadAllText → string source
+    2. CharStreams.fromString → ICharStream
+    3. new MiniGoLexer(stream)
+    4. Attach LexerErrorListener
+    5. new CommonTokenStream(lexer)
+    6. new MiniGoParser(tokens)
+    7. Attach ParserErrorListener
+    8. parser.root() → RootContext
+end note
+
+' ============================================================
+' PACKAGE: Grammar definitions (.g4 files)
+' ============================================================
+'package "Grammar/*.g4\n(Declarative)" #E8F5E9 {
+'    class "MiniGoLexer.g4" as LexerG4 <<grammar>> {
+'        + 73 token types
+'        + 8 fragment rules
+'        + 3 skip rules (WS, comments)
+'    }
+'    class "MiniGoParser.g4" as ParserG4 <<grammar>> {
+'        + 40 parser rules
+'        + tokenVocab = MiniGoLexer
+'    }
+'}
+
+'note right of LexerG4
+'    <b>Token categories (73 total):</b>
+'    • 19 Keywords
+'    • 35 Operators
+'    • 11 Separators
+'    • 5 Literals
+'    • IDENTIFIER
+'    • 3 skip (WS, LINE/BLOCK_COMMENT)
+'end note
+
+' ============================================================
+' PACKAGE: Generated Code (ANTLR output, .gitignored)
+' ============================================================
+'package "Generated/\n(ANTLR output)" #F3E5F5 {
+'    interface "ICharStream" as ICharStream
+'    class "CharStreams" as CharStreams {
+'        + fromString(string): ICharStream
+'    }
+'    abstract class "Lexer" as LexerBase {
+'        # _interpreter : LexerATNSimulator
+'        + NextToken() : IToken
+'        + AddErrorListener(listener)
+'        + RemoveErrorListeners()
+'    }
+'    class "MiniGoLexer\n<<partial>>" as MiniGoLexerGen {
+'        + 73 const int token types
+'        + NextToken() : IToken
+'    }
+'    interface "IToken" as IToken {
+'        + Type : int
+'        + Text : string
+'        + Line : int
+'        + Column : int
+'    }
+'    class "CommonTokenStream" as TokenStream {
+'        + CommonTokenStream(Lexer)
+'        + Lt(k) : IToken
+'        + Get(index) : IToken
+'    }
+'    class "MiniGoParser\n<<partial>>" as MiniGoParserGen {
+'        + root() : RootContext
+'        + ...40 rule entry methods
+'    }
+'    interface "IMiniGoParserVisitor\\n<Result>" as VisitorI
+'    abstract class "MiniGoParserBaseVisitor\\n<Result>" as BaseVisitor
+'
+'    MiniGoLexerGen -|> LexerBase
+'    MiniGoParserGen -|> "ANTLR Parser"
+'    LexerBase --> "LexerATNSimulator" : uses
+'    MiniGoLexerGen --> "LexerATNSimulator"
+'    CharStreams ..> ICharStream : creates
+'    BaseVisitor .|> VisitorI
+'}
+
+' ============================================================
+' PACKAGE: Error Handling (hand-written)
+' ============================================================
+package "Errors/\n(hand-written)" #FFEBEE {
+    enum "Severity" as Severity {
+        Error
+        Warning
+    }
+    class "SourceSpan\n<<struct>>" as SourceSpan {
+        + FilePath : string
+        + Line : int (1-based)
+        + Column : int (0-based)
+        + Length : int
+        --
+        + FromToken(IToken) : SourceSpan
+        + FromCharPosition(l,c,len) : SourceSpan
+    }
+    class "CompilationError\n<<sealed>>" as CompilationError {
+        + Severity : Severity
+        + Message : string
+        + Span : SourceSpan
+        + Phase : string
+    }
+    class "ErrorCollector\n<<sealed>>" as ErrorCollector {
+        - _errors : List<CompilationError>
+        - _filePath : string
+        --
+        + AddLexerError(msg, line, col)
+        + AddParserError(msg, token)
+        + HasErrors : bool
+        + Report(writer)
+    }
+    class "LexerErrorListener\n<<sealed>>" as LexerErrorListener {
+        + SyntaxError(..., offendingSymbol: int, ...)
+    }
+    class "ParserErrorListener\n<<sealed>>" as ParserErrorListener {
+        + SyntaxError(..., offendingSymbol: IToken, ...)
+    }
+'    class "MiniGoErrorStrategy\n<<sealed>>" as ErrorStrategy {
+'        delimiter-based panic mode
+'    }
+    interface "IAntlrErrorListener\\n<int>" as ILexerErrI
+    interface "IAntlrErrorListener\\n<IToken>" as IParserErrI
+'    abstract class "DefaultErrorStrategy" as DefaultErrorStrat
+
+    LexerErrorListener .|> ILexerErrI
+    ParserErrorListener .|> IParserErrI
+'    ErrorStrategy -|> DefaultErrorStrat
+    ErrorCollector *-- CompilationError
+    CompilationError *-- SourceSpan
+    CompilationError *-- Severity
+    LexerErrorListener --> ErrorCollector : delegates to
+    ParserErrorListener --> ErrorCollector : delegates to
+}
+
+' ============================================================
+' RELATIONSHIPS — Source Code Flow
+' ============================================================
+
+' Input chain
+'Main --> CharStreams : "1. File.ReadAllText()"
+'Main --> MiniGoLexerGen : "2. new MiniGoLexer(stream)"
+'Main --> TokenStream : "3. new CommonTokenStream(lexer)"
+'Main --> MiniGoParserGen : "4. new MiniGoParser(tokens)"
+
+' Error listener wiring
+Main --> LexerErrorListener : "5. AddErrorListener()"
+Main --> ParserErrorListener : "6. AddErrorListener()"
+'Main --> ErrorStrategy : "7. ErrorHandler ="
+
+' Final invocation
+Main --> MiniGoParserGen : "8. parser.root()"
+
+' Grammar → generated code
+LexerG4 ..> MiniGoLexerGen : ANTLR generates
+ParserG4 ..> MiniGoParserGen : ANTLR generates
+ParserG4 ..> LexerG4 : tokenVocab
+
+' Token stream bridge
+TokenStream --> MiniGoLexerGen : wraps & pulls tokens
+MiniGoParserGen --> TokenStream : reads from
+
+' ============================================================
+' BOUNDARY: Lexer → Parser handoff
+' ============================================================
+note as HandoffNote #C8E6C9
+    <b>↑ OUTPUT from Lexer Phase</b>
+    CommonTokenStream<IToken>
+    (buffered sequence of 73 token types,
+     WS/comments on HIDDEN channel)
+    
+    <b>↓ INPUT to Parser Phase</b>
+    MiniGoParser consumes token stream
+    via rule entry methods (root(), etc.)
+end note
+
+TokenStream .. HandoffNote
+HandoffNote .. MiniGoParserGen
+
+' ============================================================
+' LEGEND
+' ============================================================
+legend bottom
+    |= Color |= Meaning |
+    | <#E3F2FD> | Orchestration (Program.cs) |
+    | <#E8F5E9> | Grammar definitions (.g4) |
+    | <#FFF3E0> | ANTLR Runtime (NuGet) |
+    | <#F3E5F5> | Generated code (.gitignored) |
+    | <#FFEBEE> | Hand-written error handling |
+endlegend
+
+@enduml
