@@ -1,0 +1,5 @@
+package main;
+var x = 123;
+func test() {
+    print(1 +);
+}

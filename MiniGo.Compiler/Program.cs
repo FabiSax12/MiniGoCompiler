@@ -1,7 +1,7 @@
-// See https://aka.ms/new-console-template for more information
-
 using Antlr4.Runtime;
 using Generated;
+using MiniGo.Compiler.Errors;
+using MiniGo.Compiler.Errors.Listeners;
 
 if (args.Length == 0)
 {
@@ -21,19 +21,33 @@ string input = File.ReadAllText(filePath);
 
 ICharStream stream = CharStreams.fromString(input);
 MiniGoLexer lexer = new MiniGoLexer(stream);
+
+var collector = new ErrorCollector(filePath);
+
+// Lexer: replace default error listeners with our custom one
+lexer.RemoveErrorListeners();
+lexer.AddErrorListener(new LexerErrorListener(collector));
+
 CommonTokenStream tokens = new CommonTokenStream(lexer);
 MiniGoParser parser = new MiniGoParser(tokens);
 
+// Parser: replace default error listeners with our custom one
 parser.RemoveErrorListeners();
-parser.AddErrorListener(new ConsoleErrorListener<IToken>());
+parser.AddErrorListener(new ParserErrorListener(collector));
+
+// Parser: use our custom error strategy (delimiter-based recovery)
+// parser.ErrorHandler = new MiniGoErrorStrategy();
 
 MiniGoParser.RootContext tree = parser.root();
 
-if (parser.NumberOfSyntaxErrors == 0)
+// Report all collected errors sorted by source position
+collector.Report(Console.Error);
+
+if (collector.HasErrors)
 {
-    Console.WriteLine("Parsing completed successfully.");
+    Console.WriteLine($"Parsing failed with {collector.ErrorCount} error(s).");
 }
 else
 {
-    Console.WriteLine($"Parsing failed with {parser.NumberOfSyntaxErrors} error(s).");
+    Console.WriteLine("Parsing completed successfully.");
 }
