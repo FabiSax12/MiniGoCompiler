@@ -1,4 +1,5 @@
 using System.Text;
+using MiniGo.Compiler.Shared;
 
 namespace MiniGo.Compiler.Errors;
 
@@ -16,24 +17,24 @@ public sealed class ErrorCollector
         _filePath = filePath;
     }
 
-    public void Add(Severity severity, string message, SourceSpan span, string phase)
+    public void Add(Severity severity, string message, SourceSpan span, CompilationPhase phase)
     {
         _errors.Add(new CompilationError(severity, message, span, phase));
     }
 
     public void AddLexerError(string message, int line, int column)
     {
-        Add(Severity.Error, message, new SourceSpan(_filePath, line, column, 1), "Lexer");
+        Add(Severity.Error, message, new SourceSpan(_filePath, line, column, 1), CompilationPhase.Lexer);
     }
 
     public void AddLexerError(string message, Antlr4.Runtime.IToken token)
     {
-        Add(Severity.Error, message, SourceSpan.FromToken(token, _filePath), "Lexer");
+        Add(Severity.Error, message, SourceSpan.FromToken(token, _filePath), CompilationPhase.Lexer);
     }
 
     public void AddParserError(string message, Antlr4.Runtime.IToken token)
     {
-        Add(Severity.Error, message, SourceSpan.FromToken(token, _filePath), "Parser");
+        Add(Severity.Error, message, SourceSpan.FromToken(token, _filePath), CompilationPhase.Parser);
     }
 
     public int Count => _errors.Count;

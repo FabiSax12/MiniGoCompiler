@@ -1,3 +1,5 @@
+using MiniGo.Compiler.Shared;
+
 namespace MiniGo.Compiler.Errors;
 
 /// <summary>
@@ -8,9 +10,9 @@ public sealed class CompilationError
     public Severity Severity { get; }
     public string Message { get; }
     public SourceSpan Span { get; }
-    public string Phase { get; }
+    public CompilationPhase Phase { get; }
 
-    public CompilationError(Severity severity, string message, SourceSpan span, string phase)
+    public CompilationError(Severity severity, string message, SourceSpan span, CompilationPhase phase)
     {
         Severity = severity;
         Message = message;
@@ -20,6 +22,6 @@ public sealed class CompilationError
 
     public override string ToString()
     {
-        return $"[{Phase.ToUpper()} Error] {Span}: {Message}";
+        return $"[{Phase.ToString().ToUpper()} Error] {Span}: {Message}";
     }
 }

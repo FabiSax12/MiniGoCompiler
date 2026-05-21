@@ -4,5 +4,7 @@ public enum Types
 {
     String,
     Integer,
+    Float,
     Boolean,
+    Unknown
 }

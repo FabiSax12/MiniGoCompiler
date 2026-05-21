@@ -1,4 +1,5 @@
 using Antlr4.Runtime;
+using MiniGo.Compiler.Shared;
 
 namespace MiniGo.Compiler.Errors.Listeners;
 
@@ -23,7 +24,7 @@ public sealed class ParserErrorListener : IAntlrErrorListener<IToken>
         }
         else
         {
-            _collector.Add(Compiler.Errors.Severity.Error, msg, new SourceSpan("", line, column, 0), "Parser");
+            _collector.Add(Compiler.Errors.Severity.Error, msg, new SourceSpan("", line, column, 0), CompilationPhase.Parser);
         }
     }
 }
