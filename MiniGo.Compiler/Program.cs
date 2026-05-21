@@ -47,21 +47,21 @@ public static class Program
 
 		MiniGoParser.RootContext tree = parser.root();
 
+		// Type Checking
+		TypeChecker typeChecker = new TypeChecker(collector, filePath);
+		typeChecker.Visit(tree);
+
 		// Report all collected errors sorted by source position
 		collector.Report(Console.Error);
 
 		if (collector.HasErrors)
 		{
-			Console.WriteLine($"Parsing failed with {collector.ErrorCount} error(s).");
+			Console.Error.WriteLine($"Compilation failed with {collector.ErrorCount} error(s).");
 		}
 		else
 		{
-			Console.WriteLine("Parsing completed successfully.");
+			Console.Error.WriteLine("Compilation completed successfully.");
 		}
-
-		// Type Checking
-		TypeChecker typeChecker = new TypeChecker();
-		typeChecker.Visit(tree);
 
 	}
 }

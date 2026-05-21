@@ -1,0 +1,22 @@
+package main;
+
+var x int = 1;
+var x int = 2;
+
+func foo() int {
+    return 1;
+};
+
+func foo() int {
+    return 2;
+};
+
+func main() {
+    var y int = 1;
+    {
+        var y int = 2;
+        println(y);
+    };
+    println(y);
+    println(z);
+};
