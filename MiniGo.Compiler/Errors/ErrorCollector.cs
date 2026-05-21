@@ -57,7 +57,14 @@ public sealed class ErrorCollector
         var sorted = GetSortedErrors();
         foreach (var error in sorted)
         {
-            writer.WriteLine(error);
+            // Write Errors in RED and warnings in YELLOW
+            if (error.Severity == Severity.Error)
+            {
+                writer.WriteLine($"\x1b[31m{ error }\x1b[0m");
+            } else if (error.Severity == Severity.Warning)
+            {
+                writer.WriteLine($"\033[33m{ error }\x1b[0m");
+            }
         }
     }
 }

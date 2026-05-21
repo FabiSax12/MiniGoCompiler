@@ -20,6 +20,6 @@ public sealed class CompilationError
 
     public override string ToString()
     {
-        return $"{Span}: {Message}";
+        return $"[{Phase.ToUpper()} Error] {Span}: {Message}";
     }
 }
