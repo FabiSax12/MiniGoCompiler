@@ -2,9 +2,14 @@
 
 public enum Types
 {
-    String,
-    Integer,
-    Float,
-    Boolean,
-    Unknown
+	String,
+	Integer,
+	Float,
+	Boolean,
+	Rune,
+	Array,
+	Slice,
+	Struct,
+	Void,
+	Unknown
 }
