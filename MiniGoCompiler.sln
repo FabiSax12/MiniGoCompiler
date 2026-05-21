@@ -5,6 +5,8 @@ VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MiniGo.Compiler", "MiniGo.Compiler\MiniGo.Compiler.csproj", "{91A503AC-4723-4C2B-BFA9-32D812B8917A}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "IDE", "IDE\IDE.csproj", "{4A831663-23F9-41F1-ABCC-74CDBE0ACEE6}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -18,6 +20,10 @@ Global
 		{91A503AC-4723-4C2B-BFA9-32D812B8917A}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{91A503AC-4723-4C2B-BFA9-32D812B8917A}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{91A503AC-4723-4C2B-BFA9-32D812B8917A}.Release|Any CPU.Build.0 = Release|Any CPU
+		{4A831663-23F9-41F1-ABCC-74CDBE0ACEE6}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{4A831663-23F9-41F1-ABCC-74CDBE0ACEE6}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{4A831663-23F9-41F1-ABCC-74CDBE0ACEE6}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{4A831663-23F9-41F1-ABCC-74CDBE0ACEE6}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 	EndGlobalSection
