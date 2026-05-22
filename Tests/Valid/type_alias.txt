@@ -1,6 +1,7 @@
 package main;
 
-type Celsius float64;
+type BiggestFloat float64;
+type Celsius BiggestFloat;
 type Counter int;
 
 func main() {
@@ -8,4 +9,5 @@ func main() {
 	var count Counter = 0;
 	count = 42;
 	println("ok");
+	print(temp);
 };

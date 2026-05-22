@@ -1,4 +1,4 @@
-﻿using Antlr4.Runtime;
+using Antlr4.Runtime;
 using Antlr4.Runtime.Tree;
 using Generated;
 using MiniGo.Compiler.Errors;
@@ -16,6 +16,14 @@ public class TypeChecker : MiniGoParserBaseVisitor<object>
 	private int _loopDepth = 0;
 	private int _switchDepth = 0;
 
+	private readonly Dictionary<string, Dictionary<string, Types>> _structFields = new();
+	private readonly Dictionary<string, Types> _typeAliases = new();
+	private Types _currentSwitchType = Types.Unknown;
+	private MethodSymbol? _currentMethod;
+	private Dictionary<string, Types>? _currentStructFields;
+	private string? _currentStructName;
+	private readonly Stack<List<VarSymbol>> _scopeVarSymbols = new();
+
 	public TypeChecker(ErrorCollector collector, string filePath)
 	{
 		_collector = collector;
@@ -25,6 +33,11 @@ public class TypeChecker : MiniGoParserBaseVisitor<object>
 	private void Error(string message, IToken token)
 	{
 		_collector.Add(Severity.Error, message, SourceSpan.FromToken(token, _filePath), CompilationPhase.Type);
+	}
+
+	private void Warning(string message, IToken token)
+	{
+		_collector.Add(Severity.Warning, message, SourceSpan.FromToken(token, _filePath), CompilationPhase.Type);
 	}
 
 	private Types VisitType(IParseTree tree)
@@ -37,6 +50,38 @@ public class TypeChecker : MiniGoParserBaseVisitor<object>
 	private static bool IsInteger(Types type) => type is Types.Integer or Types.Rune;
 	private static bool IsOrdered(Types type) => type is Types.Integer or Types.Float or Types.String or Types.Rune;
 	private static bool IsIndexable(Types type) => type is Types.Array or Types.Slice or Types.String;
+
+	private Types ResolveDeclType(MiniGoParser.DeclTypeContext? context)
+	{
+		return TypeResolver.Resolve(context, ResolveTypeName);
+	}
+
+	private Types? ResolveTypeName(string name)
+	{
+		return _typeAliases.TryGetValue(name, out var t) ? t : null;
+	}
+
+	private string? GetStructNameForVariable(ISymbol? symbol)
+	{
+		if (symbol is VarSymbol vs && vs.DeclaredTypeName != null)
+			return vs.DeclaredTypeName;
+		return null;
+	}
+
+	private Dictionary<string, Types>? GetStructFields(string structName)
+	{
+		return _structFields.TryGetValue(structName, out var fields) ? fields : null;
+	}
+
+	private void CheckShadowing(string name, IToken token)
+	{
+		var existing = _table.Lookup(name);
+		var current = _table.LookupCurrent(name);
+		if (existing != null && current == null)
+		{
+			Warning($"Declaration of '{name}' shadows declaration in outer scope", token);
+		}
+	}
 
 	public override object VisitRoot(MiniGoParser.RootContext context)
 	{
@@ -68,7 +113,8 @@ public class TypeChecker : MiniGoParserBaseVisitor<object>
 			return base.VisitSingleVarDecl(context);
 		}
 
-		var declaredType = TypeResolver.Resolve(context.declType());
+		var declaredType = ResolveDeclType(context.declType());
+		var typeName = context.declType()?.IDENTIFIER()?.GetText();
 		var idCount = context.identifierList().IDENTIFIER().Length;
 		var varTypes = new Types[idCount];
 		for (int i = 0; i < idCount; i++)
@@ -108,36 +154,49 @@ public class TypeChecker : MiniGoParserBaseVisitor<object>
 		for (int i = 0; i < idCount; i++)
 		{
 			var token = (CommonToken)ids[i].Symbol;
-			var symbol = new VarSymbol(token, varTypes[i], _table.GetLevel(), context);
+			var name = ids[i].GetText();
+			CheckShadowing(name, token);
+			var symbol = new VarSymbol(token, varTypes[i], _table.GetLevel(), context, declaredType == Types.Struct ? typeName : null);
 			if (!_table.Define(symbol))
 			{
 				_collector.Add(
 					Severity.Error,
-					$"Variable '{ids[i].GetText()}' is already defined in this scope",
+					$"Variable '{name}' is already defined in this scope",
 					SourceSpan.FromToken(token, _filePath),
 					CompilationPhase.Declaration
 				);
 			}
+			else if (_scopeVarSymbols.Count > 0)
+			{
+				_scopeVarSymbols.Peek().Add(symbol);
+			}
 		}
 
-		return base.VisitSingleVarDecl(context);
+		return null;
 	}
 
 	public override object VisitSingleVarDeclNoExps(MiniGoParser.SingleVarDeclNoExpsContext context)
 	{
-		var type = TypeResolver.Resolve(context.declType());
+		var type = ResolveDeclType(context.declType());
+		var typeName = context.declType()?.IDENTIFIER()?.GetText();
 		foreach (var id in context.identifierList().IDENTIFIER())
 		{
 			var token = (CommonToken)id.Symbol;
-			var symbol = new VarSymbol(token, type, _table.GetLevel(), context);
+			var name = id.GetText();
+			CheckShadowing(name, token);
+			var symbol = new VarSymbol(token, type, _table.GetLevel(), context, type == Types.Struct ? typeName : null);
 			if (!_table.Define(symbol))
 			{
-				_collector.Add(Severity.Error, $"Variable '{id.GetText()}' is already defined in this scope",
+				_collector.Add(Severity.Error, $"Variable '{name}' is already defined in this scope",
 					SourceSpan.FromToken(token, _filePath), CompilationPhase.Declaration);
+			}
+			else if (_scopeVarSymbols.Count > 0)
+			{
+				_scopeVarSymbols.Peek().Add(symbol);
 			}
 		}
 
-		return base.VisitSingleVarDeclNoExps(context);
+		return null;
 	}
 
 	public override object VisitTypeDecl(MiniGoParser.TypeDeclContext context)
@@ -152,7 +211,42 @@ public class TypeChecker : MiniGoParserBaseVisitor<object>
 
 	public override object VisitSingleTypeDecl(MiniGoParser.SingleTypeDeclContext context)
 	{
-		return base.VisitSingleTypeDecl(context);
+		var typeName = context.IDENTIFIER().GetText();
+		var token = (CommonToken)context.IDENTIFIER().Symbol;
+		var declType = context.declType();
+
+		_currentStructName = typeName;
+
+		var underlyingType = declType != null ? ResolveDeclType(declType) : Types.Unknown;
+
+		if (underlyingType == Types.Unknown && declType != null)
+		{
+			var unknownName = declType.IDENTIFIER()?.GetText();
+			if (unknownName != null)
+			{
+				Error($"Unknown type: '{unknownName}'", declType.IDENTIFIER()!.Symbol);
+			}
+			else
+			{
+				Error("Unknown type in type declaration", token);
+			}
+		}
+
+		if (!_typeAliases.ContainsKey(typeName))
+		{
+			_typeAliases[typeName] = underlyingType;
+		}
+		else
+		{
+			Error($"Type '{typeName}' is already defined", token);
+		}
+
+		var symbol = new TypeAliasSymbol(token, underlyingType, _table.GetLevel(), context);
+		_table.Define(symbol);
+
+		base.VisitSingleTypeDecl(context);
+		_currentStructName = null;
+		return null;
 	}
 
 	public override object VisitFuncDecl(MiniGoParser.FuncDeclContext context)
@@ -166,13 +260,17 @@ public class TypeChecker : MiniGoParserBaseVisitor<object>
 	public override object VisitFuncFrontDecl(MiniGoParser.FuncFrontDeclContext context)
 	{
 		var name = (CommonToken)context.IDENTIFIER().Symbol;
-		var returnType = TypeResolver.Resolve(context.declType());
+		var returnType = ResolveDeclType(context.declType());
 		_currentReturnType = returnType;
 
 		if (!_table.Define(new MethodSymbol(name, returnType, _table.GetLevel(), context)))
 		{
 			_collector.Add(Severity.Error, $"Function '{name.Text}' is already defined in this scope",
 				SourceSpan.FromToken(name, _filePath), CompilationPhase.Declaration);
+		}
+		else
+		{
+			_currentMethod = (MethodSymbol)_table.Lookup(name.Text)!;
 		}
 
 		return null;
@@ -200,14 +298,42 @@ public class TypeChecker : MiniGoParserBaseVisitor<object>
 
 	public override object VisitStructDeclType(MiniGoParser.StructDeclTypeContext context)
 	{
+		var savedFields = _currentStructFields;
+		_currentStructFields = new Dictionary<string, Types>();
+
 		_table.OpenScope();
-		var result = base.VisitStructDeclType(context);
+		_scopeVarSymbols.Push(new List<VarSymbol>());
+		base.VisitStructDeclType(context);
+		_scopeVarSymbols.Pop();
 		_table.CloseScope();
-		return result;
+
+		if (_currentStructName != null)
+		{
+			_structFields[_currentStructName] = _currentStructFields;
+		}
+
+		_currentStructFields = savedFields;
+		return Types.Struct;
 	}
 
 	public override object VisitStructMemDecls(MiniGoParser.StructMemDeclsContext context)
 	{
+		foreach (var member in context.singleVarDeclNoExps())
+		{
+			var memberType = ResolveDeclType(member.declType());
+			foreach (var id in member.identifierList().IDENTIFIER())
+			{
+				var fieldName = id.GetText();
+				if (_currentStructFields != null && !_currentStructFields.ContainsKey(fieldName))
+				{
+					_currentStructFields[fieldName] = memberType;
+				}
+				else if (_currentStructFields != null)
+				{
+					Error($"Duplicate struct field '{fieldName}'", id.Symbol);
+				}
+			}
+		}
 		return base.VisitStructMemDecls(context);
 	}
 
@@ -225,7 +351,6 @@ public class TypeChecker : MiniGoParserBaseVisitor<object>
 
 		var subExprs = context.expression();
 
-		// Unary operators
 		if (subExprs != null && subExprs.Length == 1)
 		{
 			var operand = VisitType(subExprs[0]);
@@ -245,7 +370,6 @@ public class TypeChecker : MiniGoParserBaseVisitor<object>
 			}
 		}
 
-		// Binary operators
 		if (subExprs != null && subExprs.Length == 2)
 		{
 			var left = VisitType(subExprs[0]);
@@ -309,6 +433,29 @@ public class TypeChecker : MiniGoParserBaseVisitor<object>
 		if (context.selector() != null)
 		{
 			var baseType = VisitType(context.primaryExpression());
+
+			var baseExpr = context.primaryExpression();
+			if (baseExpr?.operand()?.IDENTIFIER() != null)
+			{
+				var varName = baseExpr.operand().IDENTIFIER().GetText();
+				var symbol = _table.Lookup(varName);
+				var structName = GetStructNameForVariable(symbol);
+				if (structName != null)
+				{
+					var fields = GetStructFields(structName);
+					var fieldName = context.selector().IDENTIFIER().GetText();
+					if (fields != null && fields.TryGetValue(fieldName, out var fieldType))
+					{
+						return fieldType;
+					}
+					else
+					{
+						Error($"Struct '{structName}' has no field '{fieldName}'", context.selector().IDENTIFIER().Symbol);
+						return Types.Unknown;
+					}
+				}
+			}
+
 			if (baseType != Types.Struct && baseType != Types.Unknown)
 				Error("Field access requires struct type", context.Start);
 			return Types.Unknown;
@@ -335,13 +482,25 @@ public class TypeChecker : MiniGoParserBaseVisitor<object>
 				if (symbol is MethodSymbol method)
 				{
 					var args = context.arguments().expressionList();
-					if (args != null)
+					var argExprs = args?.expression() ?? Array.Empty<MiniGoParser.ExpressionContext>();
+
+					if (argExprs.Length != method.Parameters.Count)
 					{
-						foreach (var arg in args.expression())
+						Error($"Function '{funcName}' expects {method.Parameters.Count} arguments but got {argExprs.Length}",
+							context.arguments().Start);
+					}
+
+					for (int i = 0; i < argExprs.Length && i < method.Parameters.Count; i++)
+					{
+						var argType = VisitType(argExprs[i]);
+						var paramType = method.Parameters[i].GetTokenType();
+						if (argType != paramType && argType != Types.Unknown && paramType != Types.Unknown)
 						{
-							VisitType(arg);
+							Error($"Argument {i + 1} of '{funcName}': expected '{paramType}' but got '{argType}'",
+								argExprs[i].Start);
 						}
 					}
+
 					return method.GetTokenType();
 				}
 			}
@@ -399,6 +558,10 @@ public class TypeChecker : MiniGoParserBaseVisitor<object>
 				_collector.Add(Severity.Error, $"Undefined identifier: '{name}'",
 					SourceSpan.FromToken(context.IDENTIFIER().Symbol, _filePath), CompilationPhase.Declaration);
 				return Types.Unknown;
+			}
+			if (symbol is VarSymbol vs)
+			{
+				vs.IsUsed = true;
 			}
 			return symbol.GetTokenType();
 		}
@@ -473,6 +636,7 @@ public class TypeChecker : MiniGoParserBaseVisitor<object>
 	public override object VisitBlock(MiniGoParser.BlockContext context)
 	{
 		_table.OpenScope();
+		_scopeVarSymbols.Push(new List<VarSymbol>());
 
 		if (context.Parent is MiniGoParser.FuncDeclContext funcDecl)
 		{
@@ -481,7 +645,7 @@ public class TypeChecker : MiniGoParserBaseVisitor<object>
 			{
 				foreach (var arg in front.funcArgDecls().singleVarDeclNoExps())
 				{
-					var argType = TypeResolver.Resolve(arg.declType());
+					var argType = ResolveDeclType(arg.declType());
 					foreach (var id in arg.identifierList().IDENTIFIER())
 					{
 						var token = (CommonToken)id.Symbol;
@@ -491,12 +655,41 @@ public class TypeChecker : MiniGoParserBaseVisitor<object>
 							_collector.Add(Severity.Error, $"Parameter '{id.GetText()}' is already defined",
 								SourceSpan.FromToken(token, _filePath), CompilationPhase.Declaration);
 						}
+						else if (_scopeVarSymbols.Count > 0)
+						{
+							_scopeVarSymbols.Peek().Add(symbol);
+						}
+					}
+				}
+			}
+
+			if (_currentMethod != null && front.funcArgDecls() != null)
+			{
+				foreach (var arg in front.funcArgDecls().singleVarDeclNoExps())
+				{
+					var argType = ResolveDeclType(arg.declType());
+					foreach (var id in arg.identifierList().IDENTIFIER())
+					{
+						var paramToken = (CommonToken)id.Symbol;
+						var paramSymbol = new VarSymbol(paramToken, argType, _table.GetLevel(), arg);
+						_currentMethod.AddParameter(paramSymbol);
 					}
 				}
 			}
 		}
 
 		var result = base.VisitBlock(context);
+
+		var scopeVars = _scopeVarSymbols.Pop();
+		foreach (var vs in scopeVars)
+		{
+			if (!vs.IsUsed)
+			{
+				Warning($"Variable '{vs.GetToken().Text}' is declared but never used", vs.GetToken());
+			}
+		}
+
+		_currentMethod = null;
 		_table.CloseScope();
 		return result;
 	}
@@ -604,8 +797,11 @@ public class TypeChecker : MiniGoParserBaseVisitor<object>
 							else
 							{
 								var token = (CommonToken)id.Symbol;
+								CheckShadowing(name, token);
 								var symbol = new VarSymbol(token, rhsType, _table.GetLevel(), context);
 								_table.Define(symbol);
+								if (_scopeVarSymbols.Count > 0)
+									_scopeVarSymbols.Peek().Add(symbol);
 							}
 						}
 					}
@@ -652,7 +848,6 @@ public class TypeChecker : MiniGoParserBaseVisitor<object>
 			return null;
 		}
 
-		// Compound assignment
 		var subExprs = context.expression();
 		if (subExprs != null && subExprs.Length == 2)
 		{
@@ -706,7 +901,6 @@ public class TypeChecker : MiniGoParserBaseVisitor<object>
 
 	public override object VisitLoop(MiniGoParser.LoopContext context)
 	{
-		// for block
 		var condExpr = context.expression();
 		var simpleStmts = context.simpleStatement();
 		var block = context.block();
@@ -719,7 +913,6 @@ public class TypeChecker : MiniGoParserBaseVisitor<object>
 			return null;
 		}
 
-		// for expression block
 		if (condExpr != null && (simpleStmts == null || simpleStmts.Length == 0))
 		{
 			var condType = VisitType(condExpr);
@@ -731,10 +924,10 @@ public class TypeChecker : MiniGoParserBaseVisitor<object>
 			return null;
 		}
 
-		// for init; cond; post block
 		if (simpleStmts != null && simpleStmts.Length >= 2)
 		{
 			_table.OpenScope();
+			_scopeVarSymbols.Push(new List<VarSymbol>());
 			Visit(simpleStmts[0]);
 			if (condExpr != null)
 			{
@@ -746,6 +939,14 @@ public class TypeChecker : MiniGoParserBaseVisitor<object>
 			_loopDepth++;
 			if (block != null) Visit(block);
 			_loopDepth--;
+			var scopeVars = _scopeVarSymbols.Pop();
+			foreach (var vs in scopeVars)
+			{
+				if (!vs.IsUsed)
+				{
+					Warning($"Variable '{vs.GetToken().Text}' is declared but never used", vs.GetToken());
+				}
+			}
 			_table.CloseScope();
 			return null;
 		}
@@ -760,13 +961,17 @@ public class TypeChecker : MiniGoParserBaseVisitor<object>
 			Visit(context.simpleStatement());
 		}
 		var switchExpr = context.expression();
+		var savedSwitchType = _currentSwitchType;
+		_currentSwitchType = Types.Unknown;
+
 		if (switchExpr != null)
 		{
-			VisitType(switchExpr);
+			_currentSwitchType = VisitType(switchExpr);
 		}
 		_switchDepth++;
 		Visit(context.expressionCaseClauseList());
 		_switchDepth--;
+		_currentSwitchType = savedSwitchType;
 		return null;
 	}
 
@@ -777,6 +982,19 @@ public class TypeChecker : MiniGoParserBaseVisitor<object>
 
 	public override object VisitExpressionCaseClause(MiniGoParser.ExpressionCaseClauseContext context)
 	{
+		var switchCase = context.expressionSwitchCase();
+		if (switchCase != null && switchCase.expressionList() != null)
+		{
+			foreach (var caseExpr in switchCase.expressionList().expression())
+			{
+				var caseType = VisitType(caseExpr);
+				if (_currentSwitchType != Types.Unknown && caseType != Types.Unknown && caseType != _currentSwitchType)
+				{
+					Error($"Case type '{caseType}' does not match switch expression type '{_currentSwitchType}'",
+						caseExpr.Start);
+				}
+			}
+		}
 		return base.VisitExpressionCaseClause(context);
 	}
 
