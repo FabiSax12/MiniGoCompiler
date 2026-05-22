@@ -64,7 +64,7 @@ public sealed class ErrorCollector
                 writer.WriteLine($"\x1b[31m{ error }\x1b[0m");
             } else if (error.Severity == Severity.Warning)
             {
-                writer.WriteLine($"\033[33m{ error }\x1b[0m");
+                writer.WriteLine($"\x1b[33m{ error }\x1b[0m");
             }
         }
     }
