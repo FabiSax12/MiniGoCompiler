@@ -1,0 +1,13 @@
+package main;
+
+func main() {
+	var x int = 5;
+	switch x {
+		case 1:
+			println("one");
+		case "two":
+			println("two");
+		default:
+			println("other");
+	};
+};

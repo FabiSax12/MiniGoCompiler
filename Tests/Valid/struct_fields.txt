@@ -1,0 +1,12 @@
+package main;
+
+type User struct {
+	id int;
+	name string;
+};
+
+func main() {
+	var u User;
+	u.id = 42;
+	println(u.name);
+};
