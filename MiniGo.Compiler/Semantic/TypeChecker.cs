@@ -13,16 +13,11 @@ public class TypeChecker : MiniGoParserBaseVisitor<object>
 	private readonly ErrorCollector _collector;
 	private readonly string _filePath;
 	private Types _currentReturnType = Types.Unknown;
-	private int _loopDepth = 0;
-	private int _switchDepth = 0;
-
-	private readonly Dictionary<string, Dictionary<string, Types>> _structFields = new();
-	private readonly Dictionary<string, Types> _typeAliases = new();
-	private Types _currentSwitchType = Types.Unknown;
 	private MethodSymbol? _currentMethod;
-	private Dictionary<string, Types>? _currentStructFields;
-	private string? _currentStructName;
-	private readonly Stack<List<VarSymbol>> _scopeVarSymbols = new();
+
+	private readonly TypeEnvironment _typeEnv = new();
+	private readonly ControlFlowTracker _controlFlow = new();
+	private readonly ScopeTracker _scopeTracker = new();
 
 	public TypeChecker(ErrorCollector collector, string filePath)
 	{
@@ -46,31 +41,9 @@ public class TypeChecker : MiniGoParserBaseVisitor<object>
 		return result is Types t ? t : Types.Unknown;
 	}
 
-	private static bool IsNumeric(Types type) => type is Types.Integer or Types.Float or Types.Rune;
-	private static bool IsInteger(Types type) => type is Types.Integer or Types.Rune;
-	private static bool IsOrdered(Types type) => type is Types.Integer or Types.Float or Types.String or Types.Rune;
-	private static bool IsIndexable(Types type) => type is Types.Array or Types.Slice or Types.String;
-
 	private Types ResolveDeclType(MiniGoParser.DeclTypeContext? context)
 	{
-		return TypeResolver.Resolve(context, ResolveTypeName);
-	}
-
-	private Types? ResolveTypeName(string name)
-	{
-		return _typeAliases.TryGetValue(name, out var t) ? t : null;
-	}
-
-	private string? GetStructNameForVariable(ISymbol? symbol)
-	{
-		if (symbol is VarSymbol vs && vs.DeclaredTypeName != null)
-			return vs.DeclaredTypeName;
-		return null;
-	}
-
-	private Dictionary<string, Types>? GetStructFields(string structName)
-	{
-		return _structFields.TryGetValue(structName, out var fields) ? fields : null;
+		return TypeResolver.Resolve(context, _typeEnv.ResolveAlias);
 	}
 
 	private void CheckShadowing(string name, IToken token)
@@ -166,9 +139,9 @@ public class TypeChecker : MiniGoParserBaseVisitor<object>
 					CompilationPhase.Declaration
 				);
 			}
-			else if (_scopeVarSymbols.Count > 0)
+			else
 			{
-				_scopeVarSymbols.Peek().Add(symbol);
+				_scopeTracker.Track(symbol);
 			}
 		}
 
@@ -190,9 +163,9 @@ public class TypeChecker : MiniGoParserBaseVisitor<object>
 				_collector.Add(Severity.Error, $"Variable '{name}' is already defined in this scope",
 					SourceSpan.FromToken(token, _filePath), CompilationPhase.Declaration);
 			}
-			else if (_scopeVarSymbols.Count > 0)
+			else
 			{
-				_scopeVarSymbols.Peek().Add(symbol);
+				_scopeTracker.Track(symbol);
 			}
 		}
 
@@ -215,7 +188,7 @@ public class TypeChecker : MiniGoParserBaseVisitor<object>
 		var token = (CommonToken)context.IDENTIFIER().Symbol;
 		var declType = context.declType();
 
-		_currentStructName = typeName;
+		_typeEnv.BeginStruct(typeName);
 
 		var underlyingType = declType != null ? ResolveDeclType(declType) : Types.Unknown;
 
@@ -232,11 +205,7 @@ public class TypeChecker : MiniGoParserBaseVisitor<object>
 			}
 		}
 
-		if (!_typeAliases.ContainsKey(typeName))
-		{
-			_typeAliases[typeName] = underlyingType;
-		}
-		else
+		if (!_typeEnv.RegisterAlias(typeName, underlyingType))
 		{
 			Error($"Type '{typeName}' is already defined", token);
 		}
@@ -245,7 +214,7 @@ public class TypeChecker : MiniGoParserBaseVisitor<object>
 		_table.Define(symbol);
 
 		base.VisitSingleTypeDecl(context);
-		_currentStructName = null;
+		_typeEnv.EndStruct();
 		return null;
 	}
 
@@ -298,21 +267,13 @@ public class TypeChecker : MiniGoParserBaseVisitor<object>
 
 	public override object VisitStructDeclType(MiniGoParser.StructDeclTypeContext context)
 	{
-		var savedFields = _currentStructFields;
-		_currentStructFields = new Dictionary<string, Types>();
-
 		_table.OpenScope();
-		_scopeVarSymbols.Push(new List<VarSymbol>());
+		_scopeTracker.OpenScope();
 		base.VisitStructDeclType(context);
-		_scopeVarSymbols.Pop();
+		_scopeTracker.CloseScope(_collector, _filePath);
 		_table.CloseScope();
 
-		if (_currentStructName != null)
-		{
-			_structFields[_currentStructName] = _currentStructFields;
-		}
-
-		_currentStructFields = savedFields;
+		_typeEnv.EndStruct();
 		return Types.Struct;
 	}
 
@@ -324,11 +285,7 @@ public class TypeChecker : MiniGoParserBaseVisitor<object>
 			foreach (var id in member.identifierList().IDENTIFIER())
 			{
 				var fieldName = id.GetText();
-				if (_currentStructFields != null && !_currentStructFields.ContainsKey(fieldName))
-				{
-					_currentStructFields[fieldName] = memberType;
-				}
-				else if (_currentStructFields != null)
+				if (!_typeEnv.AddField(fieldName, memberType))
 				{
 					Error($"Duplicate struct field '{fieldName}'", id.Symbol);
 				}
@@ -357,7 +314,7 @@ public class TypeChecker : MiniGoParserBaseVisitor<object>
 
 			if (context.PLUS() != null || context.MINUS() != null || context.CARET() != null)
 			{
-				if (!IsNumeric(operand) && operand != Types.Unknown)
+				if (!TypeSystem.IsNumeric(operand) && operand != Types.Unknown)
 					Error("Unary operator requires numeric operand", context.Start);
 				return operand;
 			}
@@ -379,7 +336,7 @@ public class TypeChecker : MiniGoParserBaseVisitor<object>
 			    context.PLUS() != null || context.MINUS() != null ||
 			    context.PIPE() != null || context.CARET() != null)
 			{
-				if ((!IsNumeric(left) || !IsNumeric(right)) && left != Types.Unknown && right != Types.Unknown)
+				if ((!TypeSystem.IsNumeric(left) || !TypeSystem.IsNumeric(right)) && left != Types.Unknown && right != Types.Unknown)
 					Error("Arithmetic operators require numeric operands", context.Start);
 				return left == Types.Float || right == Types.Float ? Types.Float : left;
 			}
@@ -387,7 +344,7 @@ public class TypeChecker : MiniGoParserBaseVisitor<object>
 			if (context.LSHIFT() != null || context.RSHIFT() != null ||
 			    context.AMP() != null || context.BIT_CLEAR() != null)
 			{
-				if ((!IsInteger(left) || !IsInteger(right)) && left != Types.Unknown && right != Types.Unknown)
+				if ((!TypeSystem.IsInteger(left) || !TypeSystem.IsInteger(right)) && left != Types.Unknown && right != Types.Unknown)
 					Error("Bitwise operators require integer operands", context.Start);
 				return Types.Integer;
 			}
@@ -402,7 +359,7 @@ public class TypeChecker : MiniGoParserBaseVisitor<object>
 			if (context.LESS() != null || context.LESS_EQUALS() != null ||
 			    context.GREATER() != null || context.GREATER_EQUALS() != null)
 			{
-				if ((!IsOrdered(left) || !IsOrdered(right) || left != right) && left != Types.Unknown && right != Types.Unknown)
+				if ((!TypeSystem.IsOrdered(left) || !TypeSystem.IsOrdered(right) || left != right) && left != Types.Unknown && right != Types.Unknown)
 					Error("Ordered comparison requires matching ordered types", context.Start);
 				return Types.Boolean;
 			}
@@ -439,10 +396,10 @@ public class TypeChecker : MiniGoParserBaseVisitor<object>
 			{
 				var varName = baseExpr.operand().IDENTIFIER().GetText();
 				var symbol = _table.Lookup(varName);
-				var structName = GetStructNameForVariable(symbol);
+				var structName = _typeEnv.GetStructNameForVariable(symbol);
 				if (structName != null)
 				{
-					var fields = GetStructFields(structName);
+					var fields = _typeEnv.GetStructFields(structName);
 					var fieldName = context.selector().IDENTIFIER().GetText();
 					if (fields != null && fields.TryGetValue(fieldName, out var fieldType))
 					{
@@ -465,9 +422,9 @@ public class TypeChecker : MiniGoParserBaseVisitor<object>
 		{
 			var baseType = VisitType(context.primaryExpression());
 			var indexType = VisitType(context.index());
-			if (!IsIndexable(baseType) && baseType != Types.Unknown)
+			if (!TypeSystem.IsIndexable(baseType) && baseType != Types.Unknown)
 				Error("Indexing requires array, slice, or string", context.Start);
-			if (!IsInteger(indexType) && indexType != Types.Unknown)
+			if (!TypeSystem.IsInteger(indexType) && indexType != Types.Unknown)
 				Error("Index must be integer", context.Start);
 			return baseType == Types.String ? Types.Rune : Types.Unknown;
 		}
@@ -576,12 +533,7 @@ public class TypeChecker : MiniGoParserBaseVisitor<object>
 
 	public override object VisitLiteral(MiniGoParser.LiteralContext context)
 	{
-		if (context.INTLITERAL() != null) return Types.Integer;
-		if (context.FLOATLITERAL() != null) return Types.Float;
-		if (context.RUNELITERAL() != null) return Types.Rune;
-		if (context.RAWSTRINGLITERAL() != null) return Types.String;
-		if (context.INTERPRETEDSTRINGLITERAL() != null) return Types.String;
-		return Types.Unknown;
+		return TypeSystem.LiteralType(context);
 	}
 
 	public override object VisitIndex(MiniGoParser.IndexContext context)
@@ -615,7 +567,7 @@ public class TypeChecker : MiniGoParserBaseVisitor<object>
 	public override object VisitLengthExpression(MiniGoParser.LengthExpressionContext context)
 	{
 		var argType = VisitType(context.expression());
-		if (!IsIndexable(argType) && argType != Types.Unknown)
+		if (!TypeSystem.IsIndexable(argType) && argType != Types.Unknown)
 			Error("Len requires array, slice, or string", context.Start);
 		return Types.Integer;
 	}
@@ -636,7 +588,7 @@ public class TypeChecker : MiniGoParserBaseVisitor<object>
 	public override object VisitBlock(MiniGoParser.BlockContext context)
 	{
 		_table.OpenScope();
-		_scopeVarSymbols.Push(new List<VarSymbol>());
+		_scopeTracker.OpenScope();
 
 		if (context.Parent is MiniGoParser.FuncDeclContext funcDecl)
 		{
@@ -655,9 +607,9 @@ public class TypeChecker : MiniGoParserBaseVisitor<object>
 							_collector.Add(Severity.Error, $"Parameter '{id.GetText()}' is already defined",
 								SourceSpan.FromToken(token, _filePath), CompilationPhase.Declaration);
 						}
-						else if (_scopeVarSymbols.Count > 0)
+						else
 						{
-							_scopeVarSymbols.Peek().Add(symbol);
+							_scopeTracker.Track(symbol);
 						}
 					}
 				}
@@ -680,14 +632,7 @@ public class TypeChecker : MiniGoParserBaseVisitor<object>
 
 		var result = base.VisitBlock(context);
 
-		var scopeVars = _scopeVarSymbols.Pop();
-		foreach (var vs in scopeVars)
-		{
-			if (!vs.IsUsed)
-			{
-				Warning($"Variable '{vs.GetToken().Text}' is declared but never used", vs.GetToken());
-			}
-		}
+		_scopeTracker.CloseScope(_collector, _filePath);
 
 		_currentMethod = null;
 		_table.CloseScope();
@@ -733,14 +678,14 @@ public class TypeChecker : MiniGoParserBaseVisitor<object>
 
 		if (context.BREAK() != null)
 		{
-			if (_loopDepth == 0 && _switchDepth == 0)
+			if (!_controlFlow.IsInBreakable)
 				Error("Break statement outside of loop or switch", context.Start);
 			return null;
 		}
 
 		if (context.CONTINUE() != null)
 		{
-			if (_loopDepth == 0)
+			if (!_controlFlow.IsInLoop)
 				Error("Continue statement outside of loop", context.Start);
 			return null;
 		}
@@ -761,7 +706,7 @@ public class TypeChecker : MiniGoParserBaseVisitor<object>
 			if (expr != null)
 			{
 				var exprType = VisitType(expr);
-				if (!IsNumeric(exprType) && exprType != Types.Unknown)
+				if (!TypeSystem.IsNumeric(exprType) && exprType != Types.Unknown)
 					Error("Increment/decrement requires numeric operand", context.Start);
 			}
 			return null;
@@ -800,8 +745,7 @@ public class TypeChecker : MiniGoParserBaseVisitor<object>
 								CheckShadowing(name, token);
 								var symbol = new VarSymbol(token, rhsType, _table.GetLevel(), context);
 								_table.Define(symbol);
-								if (_scopeVarSymbols.Count > 0)
-									_scopeVarSymbols.Peek().Add(symbol);
+								_scopeTracker.Track(symbol);
 							}
 						}
 					}
@@ -853,7 +797,7 @@ public class TypeChecker : MiniGoParserBaseVisitor<object>
 		{
 			var left = VisitType(subExprs[0]);
 			var right = VisitType(subExprs[1]);
-			if ((!IsNumeric(left) || !IsNumeric(right)) && left != Types.Unknown && right != Types.Unknown)
+			if ((!TypeSystem.IsNumeric(left) || !TypeSystem.IsNumeric(right)) && left != Types.Unknown && right != Types.Unknown)
 			{
 				Error("Compound assignment requires numeric operands", context.Start);
 			}
@@ -907,9 +851,9 @@ public class TypeChecker : MiniGoParserBaseVisitor<object>
 
 		if (condExpr == null && (simpleStmts == null || simpleStmts.Length == 0))
 		{
-			_loopDepth++;
+			_controlFlow.EnterLoop();
 			if (block != null) Visit(block);
-			_loopDepth--;
+			_controlFlow.ExitLoop();
 			return null;
 		}
 
@@ -918,16 +862,16 @@ public class TypeChecker : MiniGoParserBaseVisitor<object>
 			var condType = VisitType(condExpr);
 			if (condType != Types.Boolean && condType != Types.Unknown)
 				Error("For condition must be boolean", condExpr.Start);
-			_loopDepth++;
+			_controlFlow.EnterLoop();
 			if (block != null) Visit(block);
-			_loopDepth--;
+			_controlFlow.ExitLoop();
 			return null;
 		}
 
 		if (simpleStmts != null && simpleStmts.Length >= 2)
 		{
 			_table.OpenScope();
-			_scopeVarSymbols.Push(new List<VarSymbol>());
+			_scopeTracker.OpenScope();
 			Visit(simpleStmts[0]);
 			if (condExpr != null)
 			{
@@ -936,17 +880,10 @@ public class TypeChecker : MiniGoParserBaseVisitor<object>
 					Error("For condition must be boolean", condExpr.Start);
 			}
 			Visit(simpleStmts[1]);
-			_loopDepth++;
+			_controlFlow.EnterLoop();
 			if (block != null) Visit(block);
-			_loopDepth--;
-			var scopeVars = _scopeVarSymbols.Pop();
-			foreach (var vs in scopeVars)
-			{
-				if (!vs.IsUsed)
-				{
-					Warning($"Variable '{vs.GetToken().Text}' is declared but never used", vs.GetToken());
-				}
-			}
+			_controlFlow.ExitLoop();
+			_scopeTracker.CloseScope(_collector, _filePath);
 			_table.CloseScope();
 			return null;
 		}
@@ -961,17 +898,15 @@ public class TypeChecker : MiniGoParserBaseVisitor<object>
 			Visit(context.simpleStatement());
 		}
 		var switchExpr = context.expression();
-		var savedSwitchType = _currentSwitchType;
-		_currentSwitchType = Types.Unknown;
+		var switchType = Types.Unknown;
 
 		if (switchExpr != null)
 		{
-			_currentSwitchType = VisitType(switchExpr);
+			switchType = VisitType(switchExpr);
 		}
-		_switchDepth++;
+		_controlFlow.EnterSwitch(switchType);
 		Visit(context.expressionCaseClauseList());
-		_switchDepth--;
-		_currentSwitchType = savedSwitchType;
+		_controlFlow.ExitSwitch();
 		return null;
 	}
 
@@ -988,9 +923,9 @@ public class TypeChecker : MiniGoParserBaseVisitor<object>
 			foreach (var caseExpr in switchCase.expressionList().expression())
 			{
 				var caseType = VisitType(caseExpr);
-				if (_currentSwitchType != Types.Unknown && caseType != Types.Unknown && caseType != _currentSwitchType)
+				if (_controlFlow.SwitchType != Types.Unknown && caseType != Types.Unknown && caseType != _controlFlow.SwitchType)
 				{
-					Error($"Case type '{caseType}' does not match switch expression type '{_currentSwitchType}'",
+					Error($"Case type '{caseType}' does not match switch expression type '{_controlFlow.SwitchType}'",
 						caseExpr.Start);
 				}
 			}
