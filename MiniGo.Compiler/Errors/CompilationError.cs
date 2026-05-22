@@ -22,6 +22,8 @@ public sealed class CompilationError
 
     public override string ToString()
     {
-        return $"[{Phase.ToString().ToUpper()} Error] {Span}: {Message}";
+        var phase = Phase.ToString().ToUpper();
+        var label = Severity == Severity.Error ? "Error" : "Warning";
+        return $"[{phase} {label}] {Span}: {Message}";
     }
 }
