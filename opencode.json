@@ -1,0 +1,8 @@
+{
+  "permission": {
+    "edit": {
+      "*.g4": "deny",
+      "MiniGo.Compiler/Generated/*": "deny",
+    }
+  }
+}
