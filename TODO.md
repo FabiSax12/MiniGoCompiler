@@ -34,14 +34,14 @@
 - [x] Nested Scopes — Blocks `{...}`, function bodies, for-loop init scopes, struct member scopes
 - [x] Boolean Literals — `true`/`false` handled as special identifiers returning `Boolean` type
 - [x] Return Value Type Checking — Single return value type checked; void returns detected
-- [ ] Struct Field Type Resolution — Selector expressions (`struct.field`) currently return `Unknown` instead of the actual field type declared in the struct definition
-- [ ] Function Call Argument Matching — Argument types are visited but not validated against declared parameter types and counts
-- [ ] Switch-Case Type Validation — Switch expression type vs case value types are not validated for consistency
-- [ ] Type Alias Declarations — `type MyInt int` is parsed by `singleTypeDecl` but not semantically checked
+- [x] Struct Field Type Resolution — Selector expressions (`struct.field`) currently return `Unknown` instead of the actual field type declared in the struct definition
+- [x] Function Call Argument Matching — Argument types are visited but not validated against declared parameter types and counts
+- [x] Switch-Case Type Validation — Switch expression type vs case value types are not validated for consistency
+- [x] Type Alias Declarations — `type MyInt int` is parsed by `singleTypeDecl` but not semantically checked
 - [ ] Array Literal Type Inference — Array literals `[N]T{...}` not fully type-resolved
 - [ ] Struct Literal Type Checking — `StructName{field: value}` field names and types not validated
-- [ ] Unused Variable Warning — No warnings emitted for declared-but-unused variables
-- [ ] Shadowed Declaration Warning — Inner scope shadowing outer variable not flagged
+- [x] Unused Variable Warning — No warnings emitted for declared-but-unused variables
+- [x] Shadowed Declaration Warning — Inner scope shadowing outer variable not flagged
 - [ ] Multiple Return Values — Function return count > 1 not yet supported
 
 ### Code Generation (LLVM — `MiniGoEncoder.cs`)
@@ -153,7 +153,8 @@
 
 ### Compiler Pipeline (Program.cs)
 - [x] Single-File Compilation — `args[0]` → lex → parse → typecheck
-- [ ] Multi-File Compilation — Parse and type-check multiple `.txt` files as a single package
+
+[//]: # (- [ ] Multi-File Compilation — Parse and type-check multiple `.txt` files as a single package)
 - [ ] Codegen Phase Wiring — Instantiate `MiniGoEncoder`, call `encoder.Visit(tree)`, write IR output
 - [ ] Pipeline Flags — `--emit-llvm`, `--emit-obj`, `--output <path>`, `--optimize`, `--target <triple>`
 - [ ] LLVM Optimization Passes — `LLVMCreatePassManager` → run `-O1`/`-O2`/`-O3` passes on module
