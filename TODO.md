@@ -171,18 +171,18 @@
 - [ ] JSON Error Output — `--error-format json` for IDE/tool integration
 
 ### Testing
-- [ ] MSTest Project Setup — Create test project with MSTest + FluentAssertions + Moq (`dotnet new mstest`)
-- [ ] Lexer Unit Tests — Token recognition: each keyword, operator, literal type, identifier patterns
+- [x] xUnit Project Setup — Create test project with MSTest + FluentAssertions + Moq (`dotnet new mstest`)
+- [x] Lexer Unit Tests — Token recognition: each keyword, operator, literal type, identifier patterns
 - [ ] Lexer Error Tests — Invalid characters, unterminated strings/comments
-- [ ] Parser Unit Tests — Each grammar rule: parse tree structure verification
+- [?] Parser Unit Tests — Each grammar rule: parse tree structure verification
 - [ ] Parser Error Tests — Syntax error positions, error recovery correctness
 - [ ] Parser Valid Test Files — Run all files in `Tests/Valid/` and assert zero errors
 - [ ] Parser Invalid Test Files — Run all files in `Tests/Invalid/` and assert expected error count
-- [ ] TypeChecker Unit Tests — Each type rule: valid cases produce no errors, invalid cases produce expected errors
+- [?] TypeChecker Unit Tests — Each type rule: valid cases produce no errors, invalid cases produce expected errors
 - [ ] TypeChecker Edge Cases — Nested scopes, shadowed variables, recursive functions, mutually recursive types
-- [ ] Symbol Table Tests — Define/Lookup/LookupCurrent/scope isolation
+- [x] Symbol Table Tests — Define/Lookup/LookupCurrent/scope isolation
 - [ ] Codegen Unit Tests — Verify LLVM IR output for each construct (`FileCheck`-style or string matching)
-- [ ] Integration Tests — End-to-end: MiniGo source → compile → execute → assert stdout matches expected
+- [?] Integration Tests — End-to-end: MiniGo source → compile → execute → assert stdout matches expected
 - [ ] Regression Test Suite — All `Tests/` directory files as automated regression tests
 - [ ] CI/CD Integration — GitHub Actions workflow: build + test on push/PR
 
