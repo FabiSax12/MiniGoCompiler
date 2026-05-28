@@ -230,6 +230,20 @@ public sealed class MiniGoEncoder : MiniGoParserBaseVisitor<object>, IDisposable
 	private bool IsGlobalScope() => _currentFunction == default;
 
 	/// <summary>
+	/// Positions the IR builder at the end of <paramref name="block"/>.
+	/// <para>
+	/// LLVMSharp exposes <c>LLVMPositionBuilderAtEnd</c> only through the low-level static
+	/// <see cref="LLVM"/> class, whose methods take raw opaque pointer types
+	/// (<c>LLVMOpaqueBuilder*</c>, <c>LLVMOpaqueBasicBlock*</c>) and therefore require an
+	/// <c>unsafe</c> context. This wrapper isolates that requirement to a single private method
+	/// so the rest of the encoder stays safe.  <c>AllowUnsafeBlocks</c> is enabled in the
+	/// project file for this reason.
+	/// </para>
+	/// </summary>
+	private unsafe void PositionAtEnd(LLVMBasicBlockRef block) =>
+		LLVM.PositionBuilderAtEnd(_builder, block);
+
+	/// <summary>
 	/// Lazily declares <c>@printf(i8*, ...) i32</c> in the module and caches it in
 	/// <c>_functions</c> / <c>_functionTypes</c>. Subsequent calls return the cached value.
 	/// </summary>
@@ -480,7 +494,7 @@ public sealed class MiniGoEncoder : MiniGoParserBaseVisitor<object>, IDisposable
 
 		// ── Entry block ──────────────────────────────────────────────────────
 		LLVMBasicBlockRef entry = func.AppendBasicBlock("entry");
-		_builder.PositionBuilderAtEnd(entry);
+		PositionAtEnd(entry);
 		_currentFunction = func;
 
 		// ── Parameter allocas (param scope lives outside the block scope) ────
@@ -501,7 +515,7 @@ public sealed class MiniGoEncoder : MiniGoParserBaseVisitor<object>, IDisposable
 		var lastBlock = _currentFunction.LastBasicBlock;
 		if (lastBlock.Terminator == default)
 		{
-			_builder.PositionBuilderAtEnd(lastBlock);
+			PositionAtEnd(lastBlock);
 			_builder.BuildRetVoid();
 		}
 
@@ -974,7 +988,7 @@ public sealed class MiniGoEncoder : MiniGoParserBaseVisitor<object>, IDisposable
 		_builder.BuildCondBr(cond, thenBlock, hasElse ? elseBlock : mergeBlock);
 
 		// ── Then branch ──────────────────────────────────────────────────────
-		_builder.PositionBuilderAtEnd(thenBlock);
+		PositionAtEnd(thenBlock);
 		Visit(context.block()[0]);
 		// Use InsertBlock (not thenBlock) in case nested control flow moved the builder
 		if (_builder.InsertBlock.Terminator == default)
@@ -983,7 +997,7 @@ public sealed class MiniGoEncoder : MiniGoParserBaseVisitor<object>, IDisposable
 		// ── Else branch ──────────────────────────────────────────────────────
 		if (hasElse)
 		{
-			_builder.PositionBuilderAtEnd(elseBlock);
+			PositionAtEnd(elseBlock);
 
 			if (context.ifStatement() != null)
 				Visit(context.ifStatement());          // else if chain (recursive)
@@ -995,7 +1009,7 @@ public sealed class MiniGoEncoder : MiniGoParserBaseVisitor<object>, IDisposable
 		}
 
 		// ── Merge point — execution continues here ───────────────────────────
-		_builder.PositionBuilderAtEnd(mergeBlock);
+		PositionAtEnd(mergeBlock);
 
 		return null;
 	}
@@ -1031,7 +1045,7 @@ public sealed class MiniGoEncoder : MiniGoParserBaseVisitor<object>, IDisposable
 		// ── Condition ─────────────────────────────────────────────────────────
 		if (hasCond)
 		{
-			_builder.PositionBuilderAtEnd(condBlock);
+			PositionAtEnd(condBlock);
 			LLVMValueRef cond = VisitExpr(context.expression());
 			if (cond.TypeOf != BoolType)
 				cond = _builder.BuildICmp(
@@ -1043,7 +1057,7 @@ public sealed class MiniGoEncoder : MiniGoParserBaseVisitor<object>, IDisposable
 		}
 
 		// ── Body ──────────────────────────────────────────────────────────────
-		_builder.PositionBuilderAtEnd(bodyBlock);
+		PositionAtEnd(bodyBlock);
 		Visit(context.block());
 
 		// Post statement runs at the end of each iteration (e.g. i++)
@@ -1058,7 +1072,7 @@ public sealed class MiniGoEncoder : MiniGoParserBaseVisitor<object>, IDisposable
 		// ── Exit — execution continues here after the loop ────────────────────
 		// For infinite loops this block is unreachable; VisitFuncDecl's implicit
 		// BuildRetVoid handles any missing terminator if needed.
-		_builder.PositionBuilderAtEnd(exitBlock);
+		PositionAtEnd(exitBlock);
 
 		return null;
 	}
