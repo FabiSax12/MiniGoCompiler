@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text;
 using Antlr4.Runtime.Tree;
 using Generated;
 using LLVMSharp.Interop;
@@ -205,6 +206,82 @@ public sealed class MiniGoEncoder : MiniGoParserBaseVisitor<object>, IDisposable
 
 	/// <summary>Returns <see langword="true"/> when the builder is not inside any function body.</summary>
 	private bool IsGlobalScope() => _currentFunction == default;
+
+	/// <summary>
+	/// Lazily declares <c>@printf(i8*, ...) i32</c> in the module and caches it in
+	/// <c>_functions</c> / <c>_functionTypes</c>. Subsequent calls return the cached value.
+	/// </summary>
+	private LLVMValueRef GetOrDeclarePrintf()
+	{
+		const string name = "printf";
+		if (_functions.TryGetValue(name, out var existing)) return existing;
+
+		// declare i32 @printf(i8* nocapture, ...)
+		LLVMTypeRef ty = LLVMTypeRef.CreateFunction(IntType, new[] { StringType }, true);
+		LLVMValueRef fn = _module.AddFunction(name, ty);
+		_functions[name]     = fn;
+		_functionTypes[name] = ty;
+		return fn;
+	}
+
+	/// <summary>
+	/// Emits a <c>printf</c> call for every expression in <paramref name="exprList"/>,
+	/// separated by spaces and optionally followed by a newline.
+	/// Type dispatch: float → <c>%f</c>, string/i8* → <c>%s</c>,
+	/// bool (i1) → <c>%d</c> after zero-extension, everything else (int/rune) → <c>%d</c>.
+	/// </summary>
+	private void EmitPrintf(MiniGoParser.ExpressionListContext? exprList, bool newline)
+	{
+		LLVMValueRef printfFn   = GetOrDeclarePrintf();
+		LLVMTypeRef  printfType = _functionTypes["printf"];
+
+		var fmtBuilder = new StringBuilder();
+		var argVals    = new List<LLVMValueRef>();
+
+		if (exprList != null)
+		{
+			foreach (var expr in exprList.expression())
+			{
+				if (argVals.Count > 0) fmtBuilder.Append(' ');
+
+				LLVMValueRef val = VisitExpr(expr);
+
+				if (val.TypeOf == FloatType)
+				{
+					fmtBuilder.Append("%f");
+				}
+				else if (val.TypeOf == StringType)
+				{
+					fmtBuilder.Append("%s");
+				}
+				else if (val.TypeOf == BoolType)
+				{
+					// i1 is not a valid printf argument — zero-extend to i32
+					fmtBuilder.Append("%d");
+					val = _builder.BuildZExt(val, IntType, "bool2int");
+				}
+				else
+				{
+					// int (i32), rune (i32)
+					fmtBuilder.Append("%d");
+				}
+
+				argVals.Add(val);
+			}
+		}
+
+		if (newline) fmtBuilder.Append('\n');
+
+		// Build the format string as a global i8* constant
+		LLVMValueRef fmtStr = _builder.BuildGlobalStringPtr(fmtBuilder.ToString(), "println_fmt");
+
+		// Assemble args: format string first, then value arguments
+		var allArgs = new LLVMValueRef[1 + argVals.Count];
+		allArgs[0] = fmtStr;
+		argVals.CopyTo(allArgs, 1);
+
+		_builder.BuildCall2(printfType, printfFn, allArgs, "");
+	}
 
 	#endregion
 
@@ -665,7 +742,22 @@ public sealed class MiniGoEncoder : MiniGoParserBaseVisitor<object>, IDisposable
 
 	public override object VisitLengthExpression(MiniGoParser.LengthExpressionContext context)
 	{
-		return base.VisitLengthExpression(context);
+		// len(arr) → compile-time i32 constant.
+		// MiniGo only supports len on fixed-size integer arrays; the static length is
+		// embedded in the array's LLVM type ([n x i32]) stored in the scope at declaration.
+		// Array allocation is implemented in commit 9 — this will be fully testable then.
+		var primary = context.expression()?.primaryExpression();
+		var operand = primary?.operand();
+		string? name = operand?.IDENTIFIER()?.GetText();
+
+		if (name != null)
+		{
+			var (_, elemType) = ResolveLocal(name);
+			if (elemType != default && elemType.Kind == LLVMTypeKind.LLVMArrayTypeKind)
+				return LLVMValueRef.CreateConstInt(IntType, elemType.ArrayLength, false);
+		}
+
+		return LLVMValueRef.CreateConstInt(IntType, 0, false);
 	}
 
 	public override object VisitCapExpression(MiniGoParser.CapExpressionContext context)
@@ -701,7 +793,20 @@ public sealed class MiniGoEncoder : MiniGoParserBaseVisitor<object>, IDisposable
 			return null;
 		}
 
-		// PRINT / PRINTLN → commit 8
+		// PRINTLN LPAREN (expressionList | /*epsilon*/) RPAREN SEMICOLON
+		if (context.PRINTLN() != null)
+		{
+			EmitPrintf(context.expressionList(), newline: true);
+			return null;
+		}
+
+		// PRINT LPAREN (expressionList | /*epsilon*/) RPAREN SEMICOLON
+		if (context.PRINT() != null)
+		{
+			EmitPrintf(context.expressionList(), newline: false);
+			return null;
+		}
+
 		// ifStatement / loop / switch → commits 6, 7
 		// simpleStatement, block, variableDecl, typeDecl → VisitChildren dispatches correctly
 		return base.VisitStatement(context);
