@@ -1,3 +1,4 @@
+using System.Globalization;
 using Antlr4.Runtime.Tree;
 using Generated;
 using LLVMSharp.Interop;
@@ -22,11 +23,12 @@ public sealed class MiniGoEncoder : MiniGoParserBaseVisitor<object>, IDisposable
 	private readonly LLVMBuilderRef _builder;
 
 	/// <summary>
-	/// Lexical scope stack. Each entry maps an identifier name to its alloca slot (local)
-	/// or global value ref. The stack grows inward: bottom entry = global scope,
-	/// top entry = innermost active scope.
+	/// Lexical scope stack. Each entry maps an identifier name to its alloca/global pointer
+	/// and the LLVM element type of that pointer. Both are needed: the pointer for
+	/// <c>BuildStore</c> and the element type for <c>BuildLoad2</c>.
+	/// Stack grows inward: bottom = global scope, top = innermost active scope.
 	/// </summary>
-	private readonly Stack<Dictionary<string, LLVMValueRef>> _scopes = new();
+	private readonly Stack<Dictionary<string, (LLVMValueRef Ptr, LLVMTypeRef ElemType)>> _scopes = new();
 
 	/// <summary>Declared function values keyed by name — used when building call instructions.</summary>
 	private readonly Dictionary<string, LLVMValueRef> _functions = new();
@@ -117,33 +119,59 @@ public sealed class MiniGoEncoder : MiniGoParserBaseVisitor<object>, IDisposable
 	/// Opens a new lexical scope. Call at the start of every block (<c>{}</c>)
 	/// and function body so variable lifetimes are properly isolated.
 	/// </summary>
-	private void PushScope() => _scopes.Push(new Dictionary<string, LLVMValueRef>());
+	private void PushScope() =>
+		_scopes.Push(new Dictionary<string, (LLVMValueRef Ptr, LLVMTypeRef ElemType)>());
 
 	/// <summary>Closes the innermost lexical scope and discards its bindings.</summary>
 	private void PopScope() => _scopes.Pop();
 
 	/// <summary>
-	/// Registers <paramref name="value"/> under <paramref name="name"/> in the current
-	/// innermost scope. The value is normally an alloca slot (local) or global ref.
+	/// Registers an alloca/global pointer and its element type under <paramref name="name"/>
+	/// in the current innermost scope.
 	/// </summary>
-	private void DefineValue(string name, LLVMValueRef value)
+	/// <param name="name">Identifier as it appears in MiniGo source.</param>
+	/// <param name="ptr">The alloca slot (local) or global value ref.</param>
+	/// <param name="elemType">LLVM type of the stored element — needed by <c>BuildLoad2</c>.</param>
+	private void DefineLocal(string name, LLVMValueRef ptr, LLVMTypeRef elemType)
 	{
 		if (_scopes.TryPeek(out var scope))
-			scope[name] = value;
+			scope[name] = (ptr, elemType);
 	}
 
 	/// <summary>
 	/// Resolves <paramref name="name"/> by walking from the innermost scope outward.
-	/// Returns a default (null) <see cref="LLVMValueRef"/> if not found — this should
-	/// not happen after successful semantic analysis.
+	/// Returns <c>default</c> (null ptr + null type) if not found — this should not
+	/// happen after successful semantic analysis.
 	/// </summary>
-	private LLVMValueRef ResolveValue(string name)
+	private (LLVMValueRef Ptr, LLVMTypeRef ElemType) ResolveLocal(string name)
 	{
 		foreach (var scope in _scopes)
-			if (scope.TryGetValue(name, out var val))
-				return val;
+			if (scope.TryGetValue(name, out var entry))
+				return entry;
 		return default;
 	}
+
+	#endregion
+
+	#region Visitor Helpers
+
+	/// <summary>
+	/// Visits <paramref name="tree"/> and casts the result to <see cref="LLVMValueRef"/>.
+	/// Use for any parse-tree node that is expected to produce an LLVM value (expressions,
+	/// literals, operands). Statement visitors return <c>null</c> and must not use this.
+	/// </summary>
+	private LLVMValueRef VisitExpr(IParseTree tree) => (LLVMValueRef)Visit(tree);
+
+	/// <summary>
+	/// Processes a Go-style escape sequence string (content between double-quotes,
+	/// with the outer quotes already removed).
+	/// </summary>
+	private static string UnescapeString(string s) =>
+		s.Replace("\\n",  "\n")
+		 .Replace("\\t",  "\t")
+		 .Replace("\\r",  "\r")
+		 .Replace("\\\"", "\"")
+		 .Replace("\\\\", "\\");
 
 	#endregion
 
@@ -276,17 +304,90 @@ public sealed class MiniGoEncoder : MiniGoParserBaseVisitor<object>, IDisposable
 
 	public override object VisitPrimaryExpression(MiniGoParser.PrimaryExpressionContext context)
 	{
+		// operand: literal | IDENTIFIER | ( expression )
+		if (context.operand() != null)
+			return Visit(context.operand());
+
+		// index, selector, arguments, appendExpression, lengthExpression, capExpression
+		// are implemented in later commits; fall through to base (returns null) for now.
 		return base.VisitPrimaryExpression(context);
 	}
 
 	public override object VisitOperand(MiniGoParser.OperandContext context)
 	{
-		return base.VisitOperand(context);
+		// Literal value (int, float, rune, string)
+		if (context.literal() != null)
+			return Visit(context.literal());
+
+		// Identifier: true/false are keywords represented as identifiers in the grammar
+		if (context.IDENTIFIER() != null)
+		{
+			string name = context.IDENTIFIER().GetText();
+
+			if (name == "true")
+				return LLVMValueRef.CreateConstInt(BoolType, 1, false);
+			if (name == "false")
+				return LLVMValueRef.CreateConstInt(BoolType, 0, false);
+
+			// Regular variable: find its alloca pointer and load the value
+			var (ptr, elemType) = ResolveLocal(name);
+			if (ptr == default)
+				return LLVMValueRef.CreateConstNull(IntType); // unreachable after semantic analysis
+			return _builder.BuildLoad2(elemType, ptr, name);
+		}
+
+		// Parenthesised expression: ( expression )
+		if (context.expression() != null)
+			return Visit(context.expression());
+
+		return LLVMValueRef.CreateConstNull(IntType);
 	}
 
 	public override object VisitLiteral(MiniGoParser.LiteralContext context)
 	{
-		return base.VisitLiteral(context);
+		// INTLITERAL → i32 constant (sign-extended so negatives work)
+		if (context.INTLITERAL() != null)
+		{
+			long value = long.Parse(context.INTLITERAL().GetText());
+			return LLVMValueRef.CreateConstInt(IntType, (ulong)value, true);
+		}
+
+		// FLOATLITERAL → double constant
+		if (context.FLOATLITERAL() != null)
+		{
+			double value = double.Parse(
+				context.FLOATLITERAL().GetText(),
+				CultureInfo.InvariantCulture);
+			return LLVMValueRef.CreateConstReal(FloatType, value);
+		}
+
+		// RUNELITERAL → i32 constant (rune = int32 in Go)
+		// Grammar produces tokens like 'a', '\n', '\t'
+		if (context.RUNELITERAL() != null)
+		{
+			string text = context.RUNELITERAL().GetText(); // e.g. 'a'
+			char c = text.Length >= 3 ? text[1] : '\0';   // strip surrounding quotes
+			return LLVMValueRef.CreateConstInt(IntType, (ulong)c, false);
+		}
+
+		// RAWSTRINGLITERAL → i8* global constant (backtick strings, used in println)
+		// Content is taken verbatim — no escape processing.
+		if (context.RAWSTRINGLITERAL() != null)
+		{
+			string text    = context.RAWSTRINGLITERAL().GetText();       // `content`
+			string content = text.Substring(1, text.Length - 2);        // strip backticks
+			return _builder.BuildGlobalStringPtr(content, "rawstr");
+		}
+
+		// INTERPRETEDSTRINGLITERAL → i8* global constant ("..." strings)
+		if (context.INTERPRETEDSTRINGLITERAL() != null)
+		{
+			string text    = context.INTERPRETEDSTRINGLITERAL().GetText(); // "content"
+			string content = UnescapeString(text.Substring(1, text.Length - 2));
+			return _builder.BuildGlobalStringPtr(content, "str");
+		}
+
+		return LLVMValueRef.CreateConstNull(IntType);
 	}
 
 	public override object VisitIndex(MiniGoParser.IndexContext context)
