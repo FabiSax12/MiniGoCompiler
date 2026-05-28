@@ -863,7 +863,65 @@ public sealed class MiniGoEncoder : MiniGoParserBaseVisitor<object>, IDisposable
 
 	public override object VisitLoop(MiniGoParser.LoopContext context)
 	{
-		return base.VisitLoop(context);
+		// Detect which of the 4 loop variants we have:
+		//   FOR block                                      → no init, no cond, no post
+		//   FOR expression block                           → no init,    cond, no post
+		//   FOR simpleStmt ; expression ; simpleStmt block →    init,    cond,    post
+		//   FOR simpleStmt ; ; simpleStmt block            →    init, no cond,    post
+		var stmts   = context.simpleStatement();
+		bool hasInit = stmts.Length >= 1;
+		bool hasPost = stmts.Length >= 2;
+		bool hasCond = context.expression() != null;
+
+		// ── Init ─────────────────────────────────────────────────────────────
+		if (hasInit)
+			Visit(stmts[0]);
+
+		// ── Block layout ──────────────────────────────────────────────────────
+		// cond_block only needed when there is a condition expression.
+		// exit_block is always created; it may be unreachable for infinite loops.
+		LLVMBasicBlockRef condBlock = hasCond
+			? _currentFunction.AppendBasicBlock("loop.cond")
+			: default;
+		LLVMBasicBlockRef bodyBlock = _currentFunction.AppendBasicBlock("loop.body");
+		LLVMBasicBlockRef exitBlock = _currentFunction.AppendBasicBlock("loop.exit");
+
+		// Jump into the loop: check condition first, or go straight to body
+		_builder.BuildBr(hasCond ? condBlock : bodyBlock);
+
+		// ── Condition ─────────────────────────────────────────────────────────
+		if (hasCond)
+		{
+			_builder.PositionBuilderAtEnd(condBlock);
+			LLVMValueRef cond = VisitExpr(context.expression());
+			if (cond.TypeOf != BoolType)
+				cond = _builder.BuildICmp(
+					LLVMIntPredicate.LLVMIntNE,
+					cond,
+					LLVMValueRef.CreateConstInt(cond.TypeOf, 0, false),
+					"tobool");
+			_builder.BuildCondBr(cond, bodyBlock, exitBlock);
+		}
+
+		// ── Body ──────────────────────────────────────────────────────────────
+		_builder.PositionBuilderAtEnd(bodyBlock);
+		Visit(context.block());
+
+		// Post statement runs at the end of each iteration (e.g. i++)
+		// Skip if the body already terminated (e.g. a return inside the loop).
+		if (hasPost && _builder.InsertBlock.Terminator == default)
+			Visit(stmts[1]);
+
+		// Back-edge: jump back to condition check (or body for infinite loops)
+		if (_builder.InsertBlock.Terminator == default)
+			_builder.BuildBr(hasCond ? condBlock : bodyBlock);
+
+		// ── Exit — execution continues here after the loop ────────────────────
+		// For infinite loops this block is unreachable; VisitFuncDecl's implicit
+		// BuildRetVoid handles any missing terminator if needed.
+		_builder.PositionBuilderAtEnd(exitBlock);
+
+		return null;
 	}
 
 	public override object VisitSwitch(MiniGoParser.SwitchContext context)
