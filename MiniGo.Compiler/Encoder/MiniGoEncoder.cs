@@ -112,6 +112,21 @@ public sealed class MiniGoEncoder : MiniGoParserBaseVisitor<object>, IDisposable
 	private static LLVMTypeRef IntArrayType(uint length) =>
 		LLVMTypeRef.CreateArray(LLVMTypeRef.Int32, length);
 
+	/// <summary>
+	/// Resolves the LLVM type for a <c>declType</c> context, handling array types correctly.
+	/// For <c>arrayDeclType</c> (<c>[n]int</c>), returns <c>[n x i32]</c>.
+	/// For all other types, delegates to <see cref="LlvmType"/> via <see cref="TypeResolver"/>.
+	/// </summary>
+	private static LLVMTypeRef LlvmTypeFromDecl(MiniGoParser.DeclTypeContext ctx)
+	{
+		if (ctx.arrayDeclType() != null)
+		{
+			uint n = uint.Parse(ctx.arrayDeclType().INTLITERAL().GetText());
+			return IntArrayType(n);
+		}
+		return LlvmType(TypeResolver.Resolve(ctx));
+	}
+
 	#endregion
 
 	#region Scope and Symbol Helpers
@@ -198,8 +213,15 @@ public sealed class MiniGoEncoder : MiniGoParserBaseVisitor<object>, IDisposable
 		if (operand?.IDENTIFIER() != null)
 			return ResolveLocal(operand.IDENTIFIER().GetText()).Ptr;
 
-		// Array index: arr[i] — GEP emitted in commit 9; placeholder for now
-		// if (primary.index() != null) { ... }
+		// Array element: arr[i]  →  GEP2 pointer to element (used by BuildStore in caller)
+		if (primary.index() != null)
+		{
+			string arrName = primary.primaryExpression().operand().IDENTIFIER().GetText();
+			var (arrPtr, arrType) = ResolveLocal(arrName);
+			LLVMValueRef idx  = VisitExpr(primary.index().expression());
+			LLVMValueRef zero = LLVMValueRef.CreateConstInt(IntType, 0, false);
+			return _builder.BuildGEP2(arrType, arrPtr, new[] { zero, idx }, "elem_ptr");
+		}
 
 		return default;
 	}
@@ -355,10 +377,10 @@ public sealed class MiniGoEncoder : MiniGoParserBaseVisitor<object>, IDisposable
 				: LLVMValueRef.CreateConstNull(IntType);
 
 			// Determine the LLVM element type:
-			//   - Explicit type annotation → use TypeResolver
+			//   - Explicit type annotation → use LlvmTypeFromDecl (handles arrays)
 			//   - Type inference (var x = expr) → derive from the evaluated value
 			LLVMTypeRef elemType = context.declType() != null
-				? LlvmType(TypeResolver.Resolve(context.declType()))
+				? LlvmTypeFromDecl(context.declType())
 				: initVal.TypeOf;
 
 			EmitVarBinding(name, initVal, elemType);
@@ -369,9 +391,9 @@ public sealed class MiniGoEncoder : MiniGoParserBaseVisitor<object>, IDisposable
 
 	public override object VisitSingleVarDeclNoExps(MiniGoParser.SingleVarDeclNoExpsContext context)
 	{
-		// var x int  (no initialiser → zero value)
-		var ids      = context.identifierList().IDENTIFIER();
-		LLVMTypeRef elemType = LlvmType(TypeResolver.Resolve(context.declType()));
+		// var x int  or  var a [5]int  (no initialiser → zero value)
+		var ids = context.identifierList().IDENTIFIER();
+		LLVMTypeRef elemType = LlvmTypeFromDecl(context.declType());
 
 		foreach (var id in ids)
 			EmitVarBinding(id.GetText(), LlvmDefaultValue(elemType), elemType);
@@ -638,8 +660,20 @@ public sealed class MiniGoEncoder : MiniGoParserBaseVisitor<object>, IDisposable
 			return _builder.BuildCall2(funcType, funcVal, args.ToArray(), isVoid ? "" : "call");
 		}
 
-		// index, selector, appendExpression, lengthExpression, capExpression
-		// are implemented in later commits; fall through to base (returns null) for now.
+		// Array read: primaryExpression index  →  arr[i]
+		// GEP2 to get i32* element pointer, then Load2 to get the i32 value.
+		if (context.index() != null)
+		{
+			string arrName = context.primaryExpression().operand().IDENTIFIER().GetText();
+			var (arrPtr, arrType) = ResolveLocal(arrName);
+			LLVMValueRef idx  = VisitExpr(context.index().expression());
+			LLVMValueRef zero = LLVMValueRef.CreateConstInt(IntType, 0, false);
+			LLVMValueRef elemPtr = _builder.BuildGEP2(arrType, arrPtr, new[] { zero, idx }, "elem_ptr");
+			return _builder.BuildLoad2(IntType, elemPtr, "elem");
+		}
+
+		// selector, appendExpression, lengthExpression, capExpression
+		// lengthExpression and capExpression dispatch through VisitChildren → their own Visit* methods.
 		return base.VisitPrimaryExpression(context);
 	}
 
