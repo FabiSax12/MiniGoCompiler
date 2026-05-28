@@ -345,16 +345,83 @@ public sealed class MiniGoEncoder : MiniGoParserBaseVisitor<object>, IDisposable
 
 	public override object VisitFuncDecl(MiniGoParser.FuncDeclContext context)
 	{
-		return base.VisitFuncDecl(context);
+		var front = context.funcFrontDecl();
+		string name = front.IDENTIFIER().GetText();
+
+		// ── Return type ──────────────────────────────────────────────────────
+		LLVMTypeRef returnType = front.declType() != null
+			? LlvmType(TypeResolver.Resolve(front.declType()))
+			: VoidType;
+
+		// ── Parameter names and types ────────────────────────────────────────
+		// funcArgDecls : singleVarDeclNoExps (COMMA singleVarDeclNoExps)*
+		// singleVarDeclNoExps : identifierList declType
+		// One singleVarDeclNoExps can declare multiple ids of the same type: a, b int
+		var paramNames = new List<string>();
+		var paramTypes = new List<LLVMTypeRef>();
+
+		if (front.funcArgDecls() != null)
+		{
+			foreach (var argDecl in front.funcArgDecls().singleVarDeclNoExps())
+			{
+				LLVMTypeRef pType = LlvmType(TypeResolver.Resolve(argDecl.declType()));
+				foreach (var id in argDecl.identifierList().IDENTIFIER())
+				{
+					paramNames.Add(id.GetText());
+					paramTypes.Add(pType);
+				}
+			}
+		}
+
+		// ── Create LLVM function ─────────────────────────────────────────────
+		LLVMTypeRef funcType = LLVMTypeRef.CreateFunction(returnType, paramTypes.ToArray());
+		LLVMValueRef func    = _module.AddFunction(name, funcType);
+		_functions[name]     = func;
+		_functionTypes[name] = funcType;
+
+		// ── Entry block ──────────────────────────────────────────────────────
+		LLVMBasicBlockRef entry = func.AppendBasicBlock("entry");
+		_builder.PositionBuilderAtEnd(entry);
+		_currentFunction = func;
+
+		// ── Parameter allocas (param scope lives outside the block scope) ────
+		PushScope();
+		for (int i = 0; i < paramNames.Count; i++)
+		{
+			LLVMValueRef alloca = _builder.BuildAlloca(paramTypes[i], paramNames[i]);
+			_builder.BuildStore(func.GetParam((uint)i), alloca);
+			DefineLocal(paramNames[i], alloca, paramTypes[i]);
+		}
+
+		// ── Body (VisitBlock opens its own inner scope) ──────────────────────
+		Visit(context.block());
+
+		// ── Implicit terminator for void functions or missing return ─────────
+		// LLVM verification requires every basic block to end with a terminator.
+		// If semantic analysis passed but the last block has no branch/ret, add one.
+		var lastBlock = _currentFunction.LastBasicBlock;
+		if (lastBlock.Terminator == default)
+		{
+			_builder.PositionBuilderAtEnd(lastBlock);
+			_builder.BuildRetVoid();
+		}
+
+		// ── Cleanup ──────────────────────────────────────────────────────────
+		PopScope();
+		_currentFunction = default;
+
+		return null;
 	}
 
 	public override object VisitFuncFrontDecl(MiniGoParser.FuncFrontDeclContext context)
 	{
+		// Processed directly by VisitFuncDecl; no standalone visit needed.
 		return base.VisitFuncFrontDecl(context);
 	}
 
 	public override object VisitFuncArgDecls(MiniGoParser.FuncArgDeclsContext context)
 	{
+		// Processed directly by VisitFuncDecl; no standalone visit needed.
 		return base.VisitFuncArgDecls(context);
 	}
 
@@ -472,7 +539,29 @@ public sealed class MiniGoEncoder : MiniGoParserBaseVisitor<object>, IDisposable
 		if (context.operand() != null)
 			return Visit(context.operand());
 
-		// index, selector, arguments, appendExpression, lengthExpression, capExpression
+		// Function call: primaryExpression arguments
+		// The nested primaryExpression is the callee; arguments wraps the arg list.
+		if (context.arguments() != null)
+		{
+			// Callee must be a plain identifier (MiniGo has no first-class functions)
+			string funcName = context.primaryExpression().operand().IDENTIFIER().GetText();
+
+			if (!_functions.TryGetValue(funcName, out var funcVal) ||
+			    !_functionTypes.TryGetValue(funcName, out var funcType))
+				return LLVMValueRef.CreateConstNull(IntType); // unreachable after semantic analysis
+
+			// Evaluate arguments
+			var args = new List<LLVMValueRef>();
+			if (context.arguments().expressionList() != null)
+				foreach (var expr in context.arguments().expressionList().expression())
+					args.Add(VisitExpr(expr));
+
+			// Void calls must not carry a result name in the IR
+			bool isVoid = funcType.ReturnType == VoidType;
+			return _builder.BuildCall2(funcType, funcVal, args.ToArray(), isVoid ? "" : "call");
+		}
+
+		// index, selector, appendExpression, lengthExpression, capExpression
 		// are implemented in later commits; fall through to base (returns null) for now.
 		return base.VisitPrimaryExpression(context);
 	}
@@ -602,6 +691,19 @@ public sealed class MiniGoEncoder : MiniGoParserBaseVisitor<object>, IDisposable
 
 	public override object VisitStatement(MiniGoParser.StatementContext context)
 	{
+		// RETURN (expression | /*epsilon*/) SEMICOLON
+		if (context.RETURN() != null)
+		{
+			if (context.expression() != null)
+				_builder.BuildRet(VisitExpr(context.expression()));
+			else
+				_builder.BuildRetVoid();
+			return null;
+		}
+
+		// PRINT / PRINTLN → commit 8
+		// ifStatement / loop / switch → commits 6, 7
+		// simpleStatement, block, variableDecl, typeDecl → VisitChildren dispatches correctly
 		return base.VisitStatement(context);
 	}
 
