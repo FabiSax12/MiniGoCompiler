@@ -808,7 +808,57 @@ public sealed class MiniGoEncoder : MiniGoParserBaseVisitor<object>, IDisposable
 
 	public override object VisitIfStatement(MiniGoParser.IfStatementContext context)
 	{
-		return base.VisitIfStatement(context);
+		// Optional init statement:  IF simpleStatement ; expression block ...
+		if (context.simpleStatement() != null)
+			Visit(context.simpleStatement());
+
+		// ── Condition ────────────────────────────────────────────────────────
+		LLVMValueRef cond = VisitExpr(context.expression());
+
+		// Coerce non-i1 values to bool (e.g. an int used as a condition)
+		if (cond.TypeOf != BoolType)
+			cond = _builder.BuildICmp(
+				LLVMIntPredicate.LLVMIntNE,
+				cond,
+				LLVMValueRef.CreateConstInt(cond.TypeOf, 0, false),
+				"tobool");
+
+		// ── Block layout ─────────────────────────────────────────────────────
+		bool hasElse = context.ELSE() != null;
+
+		LLVMBasicBlockRef thenBlock  = _currentFunction.AppendBasicBlock("if.then");
+		LLVMBasicBlockRef elseBlock  = hasElse
+			? _currentFunction.AppendBasicBlock("if.else")
+			: default;
+		LLVMBasicBlockRef mergeBlock = _currentFunction.AppendBasicBlock("if.merge");
+
+		_builder.BuildCondBr(cond, thenBlock, hasElse ? elseBlock : mergeBlock);
+
+		// ── Then branch ──────────────────────────────────────────────────────
+		_builder.PositionBuilderAtEnd(thenBlock);
+		Visit(context.block()[0]);
+		// Use InsertBlock (not thenBlock) in case nested control flow moved the builder
+		if (_builder.InsertBlock.Terminator == default)
+			_builder.BuildBr(mergeBlock);
+
+		// ── Else branch ──────────────────────────────────────────────────────
+		if (hasElse)
+		{
+			_builder.PositionBuilderAtEnd(elseBlock);
+
+			if (context.ifStatement() != null)
+				Visit(context.ifStatement());          // else if chain (recursive)
+			else
+				Visit(context.block()[1]);             // else { }
+
+			if (_builder.InsertBlock.Terminator == default)
+				_builder.BuildBr(mergeBlock);
+		}
+
+		// ── Merge point — execution continues here ───────────────────────────
+		_builder.PositionBuilderAtEnd(mergeBlock);
+
+		return null;
 	}
 
 	public override object VisitLoop(MiniGoParser.LoopContext context)
