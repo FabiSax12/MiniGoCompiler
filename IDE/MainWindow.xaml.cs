@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
@@ -23,6 +24,10 @@ namespace IDE;
 /// </summary>
 public partial class MainWindow : Window
 {
+    // ── RoutedCommands for F5/F6 key bindings declared in XAML ──────────────
+    public static readonly RoutedCommand BuildCommand = new();
+    public static readonly RoutedCommand RunCommand   = new();
+
     private string? _currentFilePath;
     private string? _rootFolder;
     private DispatcherTimer _compileDebounceTimer = null!;
@@ -34,6 +39,7 @@ public partial class MainWindow : Window
         LoadSyntaxHighlighting();
         SetupErrorHighlighter();
         SetupDebounce();
+        RegisterBuildRunCommands();
         textEditor.TextChanged += OnEditorTextChanged;
         textEditor.TextArea.KeyDown += OnEditorKeyDown;
         fileTree.MouseDoubleClick += OnFileTreeMouseDoubleClick;
@@ -249,6 +255,139 @@ public partial class MainWindow : Window
     {
         statusLabel.Text = message;
     }
+
+    #endregion
+
+    #region Build and Run
+
+    /// <summary>
+    /// Wires the F5/F6 RoutedCommands declared as static fields to their click handlers.
+    /// This lets the toolbar buttons and the key bindings share the same code path.
+    /// </summary>
+    private void RegisterBuildRunCommands()
+    {
+        CommandBindings.Add(new CommandBinding(BuildCommand, async (_, _) => await ExecuteBuildAsync()));
+        CommandBindings.Add(new CommandBinding(RunCommand,   async (_, _) => await ExecuteRunAsync()));
+    }
+
+    private async void OnBuildClick(object sender, RoutedEventArgs e) => await ExecuteBuildAsync();
+    private async void OnRunClick(object sender,  RoutedEventArgs e)  => await ExecuteRunAsync();
+
+    /// <summary>
+    /// Resolves the MiniGo.Compiler .csproj path relative to the IDE output directory.
+    /// Layout: IDE/bin/Debug/net8.0-windows/ → up 4 levels → MiniGoCompiler/ → MiniGo.Compiler/
+    /// </summary>
+    private static string CompilerProjectPath()
+    {
+        string baseDir = AppDomain.CurrentDomain.BaseDirectory;
+        return Path.GetFullPath(
+            Path.Combine(baseDir, "..", "..", "..", "..", "MiniGo.Compiler", "MiniGo.Compiler.csproj"));
+    }
+
+    private async Task ExecuteBuildAsync()
+    {
+        if (string.IsNullOrEmpty(_currentFilePath))
+        {
+            AppendOutput("No file open. Open a .go file before building.");
+            return;
+        }
+
+        string compilerProject = CompilerProjectPath();
+        if (!File.Exists(compilerProject))
+        {
+            AppendOutput($"Compiler project not found at:\n  {compilerProject}");
+            return;
+        }
+
+        SetOutput("Building...");
+        UpdateStatus("Building…");
+        buildButton.IsEnabled = false;
+
+        try
+        {
+            var psi = new ProcessStartInfo("dotnet",
+                $"run --project \"{compilerProject}\" -- \"{_currentFilePath}\"")
+            {
+                RedirectStandardOutput = true,
+                RedirectStandardError  = true,
+                UseShellExecute        = false,
+                CreateNoWindow         = true
+            };
+
+            using var proc = Process.Start(psi)!;
+            string stdout = await proc.StandardOutput.ReadToEndAsync();
+            string stderr = await proc.StandardError.ReadToEndAsync();
+            await proc.WaitForExitAsync();
+
+            string combined = (stdout + stderr).Trim();
+            SetOutput(combined.Length > 0 ? combined : "(no output)");
+
+            UpdateStatus(proc.ExitCode == 0
+                ? "Build succeeded"
+                : $"Build failed (exit {proc.ExitCode})");
+        }
+        catch (Exception ex)
+        {
+            SetOutput($"Failed to start compiler:\n{ex.Message}");
+            UpdateStatus("Build error");
+        }
+        finally
+        {
+            buildButton.IsEnabled = true;
+        }
+    }
+
+    private async Task ExecuteRunAsync()
+    {
+        if (string.IsNullOrEmpty(_currentFilePath))
+        {
+            AppendOutput("No file open.");
+            return;
+        }
+
+        string llPath = Path.ChangeExtension(_currentFilePath, ".ll");
+        if (!File.Exists(llPath))
+        {
+            SetOutput($"No .ll file found at:\n  {llPath}\nRun Build (F6) first.");
+            return;
+        }
+
+        SetOutput($"Running {Path.GetFileName(llPath)}...\n");
+        UpdateStatus("Running…");
+        runButton.IsEnabled = false;
+
+        try
+        {
+            var psi = new ProcessStartInfo("lli", $"\"{llPath}\"")
+            {
+                RedirectStandardOutput = true,
+                RedirectStandardError  = true,
+                UseShellExecute        = false,
+                CreateNoWindow         = true
+            };
+
+            using var proc = Process.Start(psi)!;
+            string stdout = await proc.StandardOutput.ReadToEndAsync();
+            string stderr = await proc.StandardError.ReadToEndAsync();
+            await proc.WaitForExitAsync();
+
+            string output = (stdout + (stderr.Length > 0 ? "\n[stderr]\n" + stderr : "")).TrimEnd();
+            AppendOutput(output.Length > 0 ? output : "(no output)");
+            UpdateStatus($"Exited with code {proc.ExitCode}");
+        }
+        catch (Exception ex)
+        {
+            SetOutput($"Failed to start lli:\n{ex.Message}\n\nMake sure LLVM is installed and 'lli' is on your PATH.");
+            UpdateStatus("Run error");
+        }
+        finally
+        {
+            runButton.IsEnabled = true;
+        }
+    }
+
+    private void SetOutput(string text)    => outputPanel.Text = text;
+    private void AppendOutput(string text) => outputPanel.Text += text;
 
     #endregion
 }
