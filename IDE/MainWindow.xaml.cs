@@ -220,16 +220,29 @@ public partial class MainWindow : Window
             collector.AddLexerError($"Internal compiler error: {ex.Message}", 1, 0);
         }
 
-        _errorHighlighter?.UpdateErrors(textEditor.Document, collector.GetSortedErrors());
+        var errors = collector.GetSortedErrors();
+        _errorHighlighter?.UpdateErrors(textEditor.Document, errors);
+        errorList.ItemsSource = errors
+            .Select(e => new ErrorViewModel(e))
+            .ToList();
 
         if (collector.HasErrors)
-        {
             UpdateStatus($"{collector.ErrorCount} error(s)");
-        }
         else
-        {
             UpdateStatus("Compilation successful");
-        }
+    }
+
+    private void OnErrorListDoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        if (errorList.SelectedItem is not ErrorViewModel vm) return;
+
+        int lineNumber = Math.Max(1, vm.Line);
+        if (lineNumber > textEditor.Document.LineCount) return;
+
+        var docLine = textEditor.Document.GetLineByNumber(lineNumber);
+        textEditor.ScrollToLine(lineNumber);
+        textEditor.CaretOffset = docLine.Offset + Math.Max(0, Math.Min(vm.Column, docLine.Length));
+        textEditor.Focus();
     }
 
     private void UpdateStatus(string message)
@@ -238,6 +251,26 @@ public partial class MainWindow : Window
     }
 
     #endregion
+}
+
+/// <summary>
+/// Row model for the error list DataGrid.
+/// Wraps a <see cref="CompilationError"/> into bindable flat properties.
+/// </summary>
+public sealed class ErrorViewModel
+{
+    public string Severity { get; }
+    public int    Line     { get; }
+    public int    Column   { get; }
+    public string Message  { get; }
+
+    public ErrorViewModel(CompilationError error)
+    {
+        Severity = error.Severity.ToString();
+        Line     = error.Span.Line;
+        Column   = error.Span.Column;
+        Message  = error.Message;
+    }
 }
 
 /// <summary>

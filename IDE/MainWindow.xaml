@@ -88,6 +88,8 @@
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
+                    <RowDefinition Height="4" />
+                    <RowDefinition Height="140" MinHeight="80" />
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
@@ -112,8 +114,51 @@
                                        HorizontalScrollBarVisibility="Auto"
                                        VerticalScrollBarVisibility="Auto" />
 
+                <!-- Splitter between editor and error list -->
+                <GridSplitter Grid.Row="2"
+                              Height="4"
+                              HorizontalAlignment="Stretch"
+                              Background="#3C3C3C"
+                              ResizeDirection="Rows" />
+
+                <!-- Error List Panel -->
+                <DataGrid x:Name="errorList"
+                          Grid.Row="3"
+                          AutoGenerateColumns="False"
+                          IsReadOnly="True"
+                          SelectionMode="Single"
+                          SelectionUnit="FullRow"
+                          HeadersVisibility="Column"
+                          Background="#1E1E1E"
+                          Foreground="#D4D4D4"
+                          RowBackground="#1E1E1E"
+                          AlternatingRowBackground="#252526"
+                          GridLinesVisibility="None"
+                          BorderThickness="0"
+                          ColumnHeaderHeight="24"
+                          RowHeight="22"
+                          FontFamily="Consolas"
+                          FontSize="12"
+                          MouseDoubleClick="OnErrorListDoubleClick">
+                    <DataGrid.ColumnHeaderStyle>
+                        <Style TargetType="DataGridColumnHeader">
+                            <Setter Property="Background"   Value="#2D2D30" />
+                            <Setter Property="Foreground"   Value="#CCCCCC" />
+                            <Setter Property="Padding"      Value="6,0" />
+                            <Setter Property="BorderBrush"  Value="#3C3C3C" />
+                            <Setter Property="BorderThickness" Value="0,0,1,1" />
+                        </Style>
+                    </DataGrid.ColumnHeaderStyle>
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Sev"     Binding="{Binding Severity}" Width="45" />
+                        <DataGridTextColumn Header="Line"    Binding="{Binding Line}"     Width="50" />
+                        <DataGridTextColumn Header="Col"     Binding="{Binding Column}"   Width="50" />
+                        <DataGridTextColumn Header="Message" Binding="{Binding Message}"  Width="*" />
+                    </DataGrid.Columns>
+                </DataGrid>
+
                 <!-- Status Bar -->
-                <Border Grid.Row="2" Background="#007ACC" Padding="8,4">
+                <Border Grid.Row="4" Background="#007ACC" Padding="8,4">
                     <TextBlock x:Name="statusLabel"
                                Text="Ready"
                                Foreground="White"
