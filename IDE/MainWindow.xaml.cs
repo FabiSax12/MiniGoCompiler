@@ -4,9 +4,12 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
+using System.Xml;
 using Antlr4.Runtime;
 using ICSharpCode.AvalonEdit;
 using ICSharpCode.AvalonEdit.Document;
+using ICSharpCode.AvalonEdit.Highlighting;
+using ICSharpCode.AvalonEdit.Highlighting.Xshd;
 using ICSharpCode.AvalonEdit.Rendering;
 using Generated;
 using MiniGo.Compiler.Errors;
@@ -28,6 +31,7 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        LoadSyntaxHighlighting();
         SetupErrorHighlighter();
         SetupDebounce();
         textEditor.TextChanged += OnEditorTextChanged;
@@ -36,6 +40,20 @@ public partial class MainWindow : Window
         fileTree.AddHandler(TreeViewItem.ExpandedEvent, new RoutedEventHandler(OnTreeViewItemExpanded), true);
         UpdateStatus("Open a folder to get started");
     }
+
+    #region Syntax Highlighting
+
+    private void LoadSyntaxHighlighting()
+    {
+        const string xshdFile = "MiniGoHighlighting.xshd";
+        if (!File.Exists(xshdFile)) return;
+
+        using var reader = XmlReader.Create(xshdFile);
+        var highlighting = HighlightingLoader.Load(reader, HighlightingManager.Instance);
+        textEditor.SyntaxHighlighting = highlighting;
+    }
+
+    #endregion
 
     #region File Tree
 
