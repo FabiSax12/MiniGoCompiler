@@ -147,8 +147,8 @@ public partial class MainWindow : Window
         {
             var dialog = new Microsoft.Win32.OpenFileDialog
             {
-                Filter = "MiniGo Files (*.txt;*.g)|*.txt;*.g|All Files (*.*)|*.*"
-            };
+                Filter = "MiniGo Files (*.go;*.g;*.txt)|*.go;*.g;*.txt|All Files (*.*)|*.*"
+                };
             if (dialog.ShowDialog() == true)
             {
                 OpenFile(dialog.FileName);
