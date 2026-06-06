@@ -49,6 +49,20 @@
                         FontFamily="Consolas"
                         FontSize="13"
                         Cursor="Hand" />
+                <Button x:Name="stopButton"
+                        Content="⏹ Stop"
+                        Click="OnStopClick"
+                        ToolTip="Stop current build"
+                        Padding="14,5"
+                        Margin="0,0,6,0"
+                        Background="#D13438"
+                        Foreground="White"
+                        BorderThickness="0"
+                        FontFamily="Consolas"
+                        FontSize="13"
+                        Cursor="Hand"
+                        IsEnabled="False"
+                        Visibility="Hidden" />
                 <Button x:Name="runButton"
                         Content="▶ Run"
                         Click="OnRunClick"
@@ -149,6 +163,43 @@
                                        LineNumbersForeground="#858585"
                                        HorizontalScrollBarVisibility="Auto"
                                        VerticalScrollBarVisibility="Auto" />
+
+                <!-- Welcome Overlay (shown when no folder is open) -->
+                <Grid x:Name="welcomeOverlay"
+                      Grid.Row="0"
+                      Grid.RowSpan="7"
+                      Background="#1E1E1E"
+                      Visibility="Visible">
+                    <StackPanel VerticalAlignment="Center"
+                                HorizontalAlignment="Center">
+                        <TextBlock Text="MiniGo IDE"
+                                   FontSize="32"
+                                   FontWeight="Bold"
+                                   Foreground="#CCCCCC"
+                                   TextAlignment="Center"
+                                   FontFamily="Consolas"
+                                   Margin="0,0,0,10" />
+                        <TextBlock Text="Open a folder to get started"
+                                   FontSize="16"
+                                   Foreground="#808080"
+                                   TextAlignment="Center"
+                                   FontFamily="Consolas"
+                                   Margin="0,0,0,20" />
+                        <Button x:Name="welcomeOpenFolderButton"
+                                Content="📁 Open Folder"
+                                Click="OnOpenFolderClick"
+                                Width="200"
+                                Height="50"
+                                FontSize="16"
+                                FontFamily="Consolas"
+                                Background="#007ACC"
+                                Foreground="White"
+                                BorderThickness="0"
+                                Cursor="Hand"
+                                HorizontalAlignment="Center"
+                                Margin="0,0,0,0" />
+                    </StackPanel>
+                </Grid>
 
                 <!-- Splitter between editor and error list -->
                 <GridSplitter Grid.Row="2"

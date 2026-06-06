@@ -32,6 +32,7 @@ public partial class MainWindow : Window
     private string? _rootFolder;
     private DispatcherTimer _compileDebounceTimer = null!;
     private ErrorHighlighter? _errorHighlighter;
+    private Process? _currentBuildProcess;
 
     public MainWindow()
     {
@@ -72,6 +73,7 @@ public partial class MainWindow : Window
             roots.Add(new FileSystemNode(path, isDirectory: true));
             fileTree.ItemsSource = roots;
             folderPathLabel.Text = Path.GetFileName(path);
+            welcomeOverlay.Visibility = Visibility.Collapsed;
             UpdateStatus($"Opened: {path}");
         }
         catch (Exception ex)
@@ -273,6 +275,23 @@ public partial class MainWindow : Window
     private async void OnBuildClick(object sender, RoutedEventArgs e) => await ExecuteBuildAsync();
     private async void OnRunClick(object sender,  RoutedEventArgs e)  => await ExecuteRunAsync();
 
+    private void OnStopClick(object sender, RoutedEventArgs e)
+    {
+        if (_currentBuildProcess != null && !_currentBuildProcess.HasExited)
+        {
+            try
+            {
+                _currentBuildProcess.Kill();
+                SetOutput("Build process terminated");
+                UpdateStatus("Build stopped");
+            }
+            catch (Exception ex)
+            {
+                SetOutput($"Error stopping build: {ex.Message}");
+            }
+        }
+    }
+
     /// <summary>
     /// Resolves the MiniGo.Compiler .csproj path relative to the IDE output directory.
     /// Layout: IDE/bin/Debug/net8.0-windows/ → up 4 levels → MiniGoCompiler/ → MiniGo.Compiler/
@@ -302,11 +321,13 @@ public partial class MainWindow : Window
         SetOutput("Building...");
         UpdateStatus("Building…");
         buildButton.IsEnabled = false;
+        stopButton.IsEnabled = true;
+        stopButton.Visibility = Visibility.Visible;
 
         try
         {
             var psi = new ProcessStartInfo("dotnet",
-                $"run --project \"{compilerProject}\" -- \"{_currentFilePath}\"")
+                $"run --project \"{compilerProject}\" --no-restore -- \"{_currentFilePath}\"")
             {
                 RedirectStandardOutput = true,
                 RedirectStandardError  = true,
@@ -314,17 +335,22 @@ public partial class MainWindow : Window
                 CreateNoWindow         = true
             };
 
-            using var proc = Process.Start(psi)!;
-            string stdout = await proc.StandardOutput.ReadToEndAsync();
-            string stderr = await proc.StandardError.ReadToEndAsync();
-            await proc.WaitForExitAsync();
+            _currentBuildProcess = Process.Start(psi)!;
+            string stdout = await _currentBuildProcess.StandardOutput.ReadToEndAsync();
+            string stderr = await _currentBuildProcess.StandardError.ReadToEndAsync();
+            await _currentBuildProcess.WaitForExitAsync();
 
             string combined = (stdout + stderr).Trim();
             SetOutput(combined.Length > 0 ? combined : "(no output)");
 
-            UpdateStatus(proc.ExitCode == 0
+            UpdateStatus(_currentBuildProcess.ExitCode == 0
                 ? "Build succeeded"
-                : $"Build failed (exit {proc.ExitCode})");
+                : $"Build failed (exit {_currentBuildProcess.ExitCode})");
+        }
+        catch (OperationCanceledException)
+        {
+            SetOutput("Build cancelled by user");
+            UpdateStatus("Build cancelled");
         }
         catch (Exception ex)
         {
@@ -334,6 +360,9 @@ public partial class MainWindow : Window
         finally
         {
             buildButton.IsEnabled = true;
+            stopButton.IsEnabled = false;
+            stopButton.Visibility = Visibility.Hidden;
+            _currentBuildProcess = null;
         }
     }
 
