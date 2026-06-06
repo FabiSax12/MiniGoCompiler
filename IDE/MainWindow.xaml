@@ -29,6 +29,7 @@
         <Menu Grid.Row="0" Background="#2D2D30" Foreground="#CCCCCC">
             <MenuItem Header="_File">
                 <MenuItem Header="_Open Folder..." Click="OnOpenFolderClick" InputGestureText="Ctrl+Shift+O" />
+                <MenuItem x:Name="menuCloseFolder" Header="_Close Folder" Click="OnCloseFolderClick" IsEnabled="False" />
                 <Separator />
                 <MenuItem Header="E_xit" Click="OnExitClick" />
             </MenuItem>
@@ -90,6 +91,7 @@
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
 
                     <!-- Header -->
@@ -125,6 +127,44 @@
                             </HierarchicalDataTemplate>
                         </TreeView.ItemTemplate>
                     </TreeView>
+
+                    <!-- Folder Control Buttons -->
+                    <Border Grid.Row="2" Background="#252526" Padding="6,6">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Button x:Name="explorerOpenFolderButton"
+                                    Content="📁 Open"
+                                    Click="OnOpenFolderClick"
+                                    Grid.Column="0"
+                                    Height="36"
+                                    FontSize="11"
+                                    FontFamily="Consolas"
+                                    Background="#007ACC"
+                                    Foreground="White"
+                                    BorderThickness="0"
+                                    Cursor="Hand"
+                                    Padding="8,6"
+                                    Margin="0,0,3,0"
+                                    Visibility="Visible" />
+                            <Button x:Name="explorerCloseFolderButton"
+                                    Content="📁 Close"
+                                    Click="OnCloseFolderClick"
+                                    Grid.Column="1"
+                                    Height="36"
+                                    FontSize="11"
+                                    FontFamily="Consolas"
+                                    Background="#D13438"
+                                    Foreground="White"
+                                    BorderThickness="0"
+                                    Cursor="Hand"
+                                    Padding="8,6"
+                                    Margin="3,0,0,0"
+                                    Visibility="Hidden" />
+                        </Grid>
+                    </Border>
                 </Grid>
             </Border>
 

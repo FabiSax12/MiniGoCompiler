@@ -74,6 +74,9 @@ public partial class MainWindow : Window
             fileTree.ItemsSource = roots;
             folderPathLabel.Text = Path.GetFileName(path);
             welcomeOverlay.Visibility = Visibility.Collapsed;
+            explorerOpenFolderButton.Visibility = Visibility.Hidden;
+            explorerCloseFolderButton.Visibility = Visibility.Visible;
+            menuCloseFolder.IsEnabled = true;
             UpdateStatus($"Opened: {path}");
         }
         catch (Exception ex)
@@ -230,9 +233,16 @@ public partial class MainWindow : Window
 
         var errors = collector.GetSortedErrors();
         _errorHighlighter?.UpdateErrors(textEditor.Document, errors);
-        errorList.ItemsSource = errors
+        var errorViewModels = errors
             .Select(e => new ErrorViewModel(e))
             .ToList();
+        errorList.ItemsSource = errorViewModels;
+
+        // Scroll to the last error if there are any
+        if (errorViewModels.Count > 0)
+        {
+            errorList.ScrollIntoView(errorViewModels[errorViewModels.Count - 1]);
+        }
 
         if (collector.HasErrors)
             UpdateStatus($"{collector.ErrorCount} error(s)");
@@ -290,6 +300,26 @@ public partial class MainWindow : Window
                 SetOutput($"Error stopping build: {ex.Message}");
             }
         }
+    }
+
+    private void OnCloseFolderClick(object sender, RoutedEventArgs e)
+    {
+        _rootFolder = null;
+        _currentFilePath = null;
+        fileTree.ItemsSource = null;
+        folderPathLabel.Text = "";
+        textEditor.Text = "";
+        fileNameLabel.Text = "No file open";
+        errorList.ItemsSource = null;
+        SetOutput("");
+        _errorHighlighter?.ClearErrors();
+
+        welcomeOverlay.Visibility = Visibility.Visible;
+        explorerOpenFolderButton.Visibility = Visibility.Visible;
+        explorerCloseFolderButton.Visibility = Visibility.Hidden;
+        menuCloseFolder.IsEnabled = false;
+
+        UpdateStatus("Folder closed");
     }
 
     /// <summary>
@@ -415,8 +445,17 @@ public partial class MainWindow : Window
         }
     }
 
-    private void SetOutput(string text)    => outputPanel.Text = text;
-    private void AppendOutput(string text) => outputPanel.Text += text;
+    private void SetOutput(string text)
+    {
+        outputPanel.Text = text + "\n";
+        outputPanel.ScrollToEnd();
+    }
+
+    private void AppendOutput(string text)
+    {
+        outputPanel.Text += text + "\n";
+        outputPanel.ScrollToEnd();
+    }
 
     #endregion
 }
