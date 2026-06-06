@@ -7,6 +7,8 @@
     <Nullable>enable</Nullable>
     <!-- Required by MiniGoEncoder: LLVM.PositionBuilderAtEnd uses raw opaque pointers -->
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- Required for LLVMSharp.Interop to resolve libLLVM.dll from correct RID path -->
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
   </PropertyGroup>
 
   <ItemGroup>
