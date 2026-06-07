@@ -568,9 +568,24 @@ public partial class MainWindow : Window
         UpdateStatus("Running…");
         runButton.IsEnabled = false;
 
+        string lliExe = ResolveLliPath();
+        if (lliExe == null)
+        {
+            SetOutput(
+                "Failed to start lli: executable not found.\n\n" +
+                "Make sure LLVM is installed and 'lli' is on your PATH.\n" +
+                "Common install locations:\n" +
+                "  • winget install LLVM.LLVM  (adds C:\\Program Files\\LLVM\\bin to PATH)\n" +
+                "  • https://releases.llvm.org/download.html  (Windows installer)\n\n" +
+                "After installing, restart the IDE or add the LLVM bin folder to your system PATH.");
+            UpdateStatus("Run error — lli not found");
+            runButton.IsEnabled = true;
+            return;
+        }
+
         try
         {
-            var psi = new ProcessStartInfo("lli", $"\"{llPath}\"")
+            var psi = new ProcessStartInfo(lliExe, $"\"{llPath}\"")
             {
                 RedirectStandardOutput = true,
                 RedirectStandardError  = true,
@@ -608,6 +623,44 @@ public partial class MainWindow : Window
     {
         outputPanel.Text += text + "\n";
         outputPanel.ScrollToEnd();
+    }
+
+    /// <summary>
+    /// Resolves the path to the lli executable.
+    /// First checks PATH via where/which, then probes common LLVM install locations on Windows.
+    /// Returns null if lli cannot be found.
+    /// </summary>
+    private static string? ResolveLliPath()
+    {
+        // 1. Check if "lli" resolves on the system PATH.
+        try
+        {
+            var probe = new ProcessStartInfo("lli", "--version")
+            {
+                RedirectStandardOutput = true,
+                RedirectStandardError  = true,
+                UseShellExecute        = false,
+                CreateNoWindow         = true
+            };
+            using var p = Process.Start(probe);
+            p?.WaitForExit(2000);
+            if (p?.ExitCode == 0 || p?.ExitCode == 1) // lli --version exits 0 or 1
+                return "lli";
+        }
+        catch { /* not on PATH */ }
+
+        // 2. Probe common Windows install locations.
+        var candidates = new[]
+        {
+            @"C:\Program Files\LLVM\bin\lli.exe",
+            @"C:\LLVM\bin\lli.exe",
+        };
+
+        foreach (var path in candidates)
+            if (File.Exists(path))
+                return path;
+
+        return null;
     }
 
     #endregion

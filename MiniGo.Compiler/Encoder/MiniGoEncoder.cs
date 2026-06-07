@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Linq;
 using System.Text;
 using Antlr4.Runtime.Tree;
 using Generated;
@@ -33,6 +34,13 @@ public sealed class MiniGoEncoder : MiniGoParserBaseVisitor<object>, IDisposable
 
 	/// <summary>Declared function values keyed by name — used when building call instructions.</summary>
 	private readonly Dictionary<string, LLVMValueRef> _functions = new();
+
+	/// <summary>
+	/// Type alias registry: maps user-defined type names (e.g. "Counter", "Celsius") to their
+	/// resolved LLVM type. Populated by VisitSingleTypeDecl so that variable declarations that
+	/// use alias types (var x Counter) can resolve to the correct LLVM type.
+	/// </summary>
+	private readonly Dictionary<string, LLVMTypeRef> _typeAliases = new();
 
 	/// <summary>
 	/// LLVM function types keyed by name. <c>BuildCall2</c> requires the callee's
@@ -117,14 +125,22 @@ public sealed class MiniGoEncoder : MiniGoParserBaseVisitor<object>, IDisposable
 	/// For <c>arrayDeclType</c> (<c>[n]int</c>), returns <c>[n x i32]</c>.
 	/// For all other types, delegates to <see cref="LlvmType"/> via <see cref="TypeResolver"/>.
 	/// </summary>
-	private static LLVMTypeRef LlvmTypeFromDecl(MiniGoParser.DeclTypeContext ctx)
+	private LLVMTypeRef LlvmTypeFromDecl(MiniGoParser.DeclTypeContext ctx)
 	{
 		if (ctx.arrayDeclType() != null)
 		{
 			uint n = uint.Parse(ctx.arrayDeclType().INTLITERAL().GetText());
 			return IntArrayType(n);
 		}
-		return LlvmType(TypeResolver.Resolve(ctx));
+		// Struct type: not fully supported in codegen — use i32 as opaque placeholder.
+		if (ctx.structDeclType() != null)
+			return IntType;
+		// Identifier type: check type alias registry before falling back to builtins.
+		if (ctx.IDENTIFIER() != null && _typeAliases.TryGetValue(ctx.IDENTIFIER().GetText(), out var aliasType))
+			return aliasType;
+		var resolved = LlvmType(TypeResolver.Resolve(ctx));
+		// Unknown type (e.g. user-defined struct used by name) — safe fallback.
+		return resolved == LLVMTypeRef.Void ? IntType : resolved;
 	}
 
 	#endregion
@@ -198,6 +214,33 @@ public sealed class MiniGoEncoder : MiniGoParserBaseVisitor<object>, IDisposable
 		LLVMValueRef.CreateConstNull(type);
 
 	/// <summary>
+	/// Creates an i8* pointer to a null-terminated string constant.
+	/// Uses BuildGlobalStringPtr only when a builder insertion point is active (inside a function).
+	/// At global scope the builder has no active block, so we create the global directly via the
+	/// module and return a GEP-to-first-element constant — avoiding the AccessViolationException
+	/// that occurs when BuildGlobalStringPtr is called without an active insertion point.
+	/// </summary>
+	private LLVMValueRef BuildStringConstant(string content, string name)
+	{
+		if (!IsGlobalScope())
+			return _builder.BuildGlobalStringPtr(content, name);
+
+		// At global scope: create a [N x i8] global with the string bytes + null terminator,
+		// then return a constant GEP (i8*, element 0) pointing to the first byte.
+		var bytes   = Encoding.UTF8.GetBytes(content + "\0");
+		var charArr = LLVMTypeRef.CreateArray(LLVMTypeRef.Int8, (uint)bytes.Length);
+		var global  = _module.AddGlobal(charArr, name);
+		global.Linkage     = LLVMLinkage.LLVMPrivateLinkage;
+		global.IsGlobalConstant = true;
+		global.Initializer = LLVMValueRef.CreateConstArray(
+			LLVMTypeRef.Int8,
+			bytes.Select(b => LLVMValueRef.CreateConstInt(LLVMTypeRef.Int8, b, false)).ToArray());
+
+		LLVMValueRef zero = LLVMValueRef.CreateConstInt(LLVMTypeRef.Int32, 0, false);
+		return LLVMValueRef.CreateConstGEP2(charArr, global, new[] { zero, zero });
+	}
+
+	/// <summary>
 	/// Resolves the l-value pointer for the left-hand side of an assignment.
 	/// For a plain identifier <c>x</c> this is the alloca slot registered in the scope stack.
 	/// Array element indexing (<c>arr[i]</c>) is handled in commit 9.
@@ -222,6 +265,11 @@ public sealed class MiniGoEncoder : MiniGoParserBaseVisitor<object>, IDisposable
 			LLVMValueRef zero = LLVMValueRef.CreateConstInt(IntType, 0, false);
 			return _builder.BuildGEP2(arrType, arrPtr, new[] { zero, idx }, "elem_ptr");
 		}
+
+		// Struct field selector: u.id  — full struct codegen not supported; return null ptr
+		// so the caller's BuildStore is skipped (the assignment becomes a no-op).
+		if (primary.selector() != null)
+			return default;
 
 		return default;
 	}
@@ -453,7 +501,18 @@ public sealed class MiniGoEncoder : MiniGoParserBaseVisitor<object>, IDisposable
 
 	public override object VisitSingleTypeDecl(MiniGoParser.SingleTypeDeclContext context)
 	{
-		return base.VisitSingleTypeDecl(context);
+		// Register type aliases so that variable declarations using them resolve correctly.
+		// e.g.  type Counter int  →  "Counter" → i32
+		// Struct types are registered as i32 (opaque placeholder — full codegen not supported).
+		string aliasName = context.IDENTIFIER().GetText();
+		if (!_typeAliases.ContainsKey(aliasName))
+		{
+			LLVMTypeRef underlying = context.declType() != null
+				? LlvmTypeFromDecl(context.declType())
+				: IntType;
+			_typeAliases[aliasName] = underlying;
+		}
+		return null;
 	}
 
 	public override object VisitFuncDecl(MiniGoParser.FuncDeclContext context)
@@ -511,12 +570,26 @@ public sealed class MiniGoEncoder : MiniGoParserBaseVisitor<object>, IDisposable
 
 		// ── Implicit terminator for void functions or missing return ─────────
 		// LLVM verification requires every basic block to end with a terminator.
-		// If semantic analysis passed but the last block has no branch/ret, add one.
-		var lastBlock = _currentFunction.LastBasicBlock;
-		if (lastBlock.Terminator == default)
+		// Collect all blocks via the linked list, then fix any that lack a terminator:
+		//   • last block → BuildRetVoid (implicit return for void functions)
+		//   • any earlier block → BuildUnreachable (dead merge/exit after all paths returned)
+		var allBlocks = new List<LLVMBasicBlockRef>();
+		var curBlock = _currentFunction.FirstBasicBlock;
+		while (curBlock.Handle != IntPtr.Zero)
 		{
-			PositionAtEnd(lastBlock);
-			_builder.BuildRetVoid();
+			allBlocks.Add(curBlock);
+			curBlock = curBlock.Next;
+		}
+		for (int bi = 0; bi < allBlocks.Count; bi++)
+		{
+			var bb = allBlocks[bi];
+			if (bb.Terminator != default) continue;
+			PositionAtEnd(bb);
+			bool isLast = bi == allBlocks.Count - 1;
+			if (isLast)
+				_builder.BuildRetVoid();
+			else
+				_builder.BuildUnreachable();
 		}
 
 		// ── Cleanup ──────────────────────────────────────────────────────────
@@ -754,7 +827,7 @@ public sealed class MiniGoEncoder : MiniGoParserBaseVisitor<object>, IDisposable
 		{
 			string text    = context.RAWSTRINGLITERAL().GetText();       // `content`
 			string content = text.Substring(1, text.Length - 2);        // strip backticks
-			return _builder.BuildGlobalStringPtr(content, "rawstr");
+			return BuildStringConstant(content, "rawstr");
 		}
 
 		// INTERPRETEDSTRINGLITERAL → i8* global constant ("..." strings)
@@ -762,7 +835,7 @@ public sealed class MiniGoEncoder : MiniGoParserBaseVisitor<object>, IDisposable
 		{
 			string text    = context.INTERPRETEDSTRINGLITERAL().GetText(); // "content"
 			string content = UnescapeString(text.Substring(1, text.Length - 2));
-			return _builder.BuildGlobalStringPtr(content, "str");
+			return BuildStringConstant(content, "str");
 		}
 
 		return LLVMValueRef.CreateConstNull(IntType);
@@ -780,7 +853,9 @@ public sealed class MiniGoEncoder : MiniGoParserBaseVisitor<object>, IDisposable
 
 	public override object VisitSelector(MiniGoParser.SelectorContext context)
 	{
-		return base.VisitSelector(context);
+		// Struct field access (e.g. u.id) is not fully supported in codegen.
+		// Return a zero i32 to avoid NullReferenceException when the result is cast to LLVMValueRef.
+		return LLVMValueRef.CreateConstNull(IntType);
 	}
 
 	public override object VisitAppendExpression(MiniGoParser.AppendExpressionContext context)
@@ -938,8 +1013,11 @@ public sealed class MiniGoEncoder : MiniGoParserBaseVisitor<object>, IDisposable
 		LLVMValueRef lhsPtr = GetLValuePtr(subExprs[0]);
 		if (lhsPtr == default) return null;
 
-		// Determine element type from the resolved local
-		string lhsName = subExprs[0].primaryExpression().operand().IDENTIFIER().GetText();
+		// Determine element type from the resolved local.
+		// Guard against struct selectors (u.id) where operand().IDENTIFIER() would be null.
+		var lhsOperand = subExprs[0].primaryExpression()?.operand();
+		if (lhsOperand?.IDENTIFIER() == null) return null;
+		string lhsName = lhsOperand.IDENTIFIER().GetText();
 		var (_, lhsElemType) = ResolveLocal(lhsName);
 
 		LLVMValueRef lhsVal = _builder.BuildLoad2(lhsElemType, lhsPtr, "compound_lhs");
@@ -990,11 +1068,14 @@ public sealed class MiniGoEncoder : MiniGoParserBaseVisitor<object>, IDisposable
 		// ── Then branch ──────────────────────────────────────────────────────
 		PositionAtEnd(thenBlock);
 		Visit(context.block()[0]);
-		// Use InsertBlock (not thenBlock) in case nested control flow moved the builder
-		if (_builder.InsertBlock.Terminator == default)
+		// Use InsertBlock (not thenBlock) in case nested control flow moved the builder.
+		// Track whether this branch falls through to the merge block.
+		bool thenFallsThrough = _builder.InsertBlock.Terminator == default;
+		if (thenFallsThrough)
 			_builder.BuildBr(mergeBlock);
 
 		// ── Else branch ──────────────────────────────────────────────────────
+		bool elseFallsThrough = true; // no-else ↔ implicit fallthrough to merge
 		if (hasElse)
 		{
 			PositionAtEnd(elseBlock);
@@ -1004,12 +1085,17 @@ public sealed class MiniGoEncoder : MiniGoParserBaseVisitor<object>, IDisposable
 			else
 				Visit(context.block()[1]);             // else { }
 
-			if (_builder.InsertBlock.Terminator == default)
+			elseFallsThrough = _builder.InsertBlock.Terminator == default;
+			if (elseFallsThrough)
 				_builder.BuildBr(mergeBlock);
 		}
 
 		// ── Merge point — execution continues here ───────────────────────────
 		PositionAtEnd(mergeBlock);
+		// If every branch terminated (return/break/continue), no branch jumped to mergeBlock.
+		// Emit unreachable so LLVM verification passes (every block must have a terminator).
+		if (!thenFallsThrough && !elseFallsThrough)
+			_builder.BuildUnreachable();
 
 		return null;
 	}
@@ -1070,9 +1156,11 @@ public sealed class MiniGoEncoder : MiniGoParserBaseVisitor<object>, IDisposable
 			_builder.BuildBr(hasCond ? condBlock : bodyBlock);
 
 		// ── Exit — execution continues here after the loop ────────────────────
-		// For infinite loops this block is unreachable; VisitFuncDecl's implicit
-		// BuildRetVoid handles any missing terminator if needed.
 		PositionAtEnd(exitBlock);
+		// For infinite loops (no condition, no break implemented), loop.exit is never jumped to.
+		// Emit unreachable so LLVM verification passes.
+		if (!hasCond && exitBlock.Terminator == default)
+			_builder.BuildUnreachable();
 
 		return null;
 	}
