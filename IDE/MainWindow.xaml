@@ -27,11 +27,11 @@
 
         <!-- Menu Bar -->
         <Menu Grid.Row="0" Background="#2D2D30" Foreground="#CCCCCC">
-            <MenuItem Header="_File">
-                <MenuItem Header="_Open Folder..." Click="OnOpenFolderClick" InputGestureText="Ctrl+Shift+O" />
-                <MenuItem x:Name="menuCloseFolder" Header="_Close Folder" Click="OnCloseFolderClick" IsEnabled="False" />
+            <MenuItem Header="_File" Foreground="#CCCCCC">
+                <MenuItem Header="_Open Folder..." Click="OnOpenFolderClick" InputGestureText="Ctrl+Shift+O" Foreground="#000000" Background="#FFFFFF" />
+                <MenuItem x:Name="menuCloseFolder" Header="_Close Folder" Click="OnCloseFolderClick" IsEnabled="False" Foreground="#000000" Background="#FFFFFF" />
                 <Separator />
-                <MenuItem Header="E_xit" Click="OnExitClick" />
+                <MenuItem Header="E_xit" Click="OnExitClick" Foreground="#000000" Background="#FFFFFF" />
             </MenuItem>
         </Menu>
 
@@ -176,10 +176,8 @@
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
-                    <RowDefinition Height="4" />
-                    <RowDefinition Height="130" MinHeight="60" />
-                    <RowDefinition Height="4" />
-                    <RowDefinition Height="110" MinHeight="50" />
+                    <RowDefinition x:Name="mainSplitterRow" Height="4" />
+                    <RowDefinition x:Name="bottomPanelRow" Height="250" MinHeight="60" />
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
@@ -207,7 +205,7 @@
                 <!-- Welcome Overlay (shown when no folder is open) -->
                 <Grid x:Name="welcomeOverlay"
                       Grid.Row="0"
-                      Grid.RowSpan="7"
+                      Grid.RowSpan="5"
                       Background="#1E1E1E"
                       Visibility="Visible">
                     <StackPanel VerticalAlignment="Center"
@@ -241,81 +239,159 @@
                     </StackPanel>
                 </Grid>
 
-                <!-- Splitter between editor and error list -->
+                <!-- Splitter between editor and bottom panels container -->
                 <GridSplitter Grid.Row="2"
                               Height="4"
                               HorizontalAlignment="Stretch"
                               Background="#3C3C3C"
-                              ResizeDirection="Rows" />
+                              ResizeDirection="Rows"
+                              x:Name="mainSplitter" />
 
-                <!-- Error List Panel -->
-                <DataGrid x:Name="errorList"
-                          Grid.Row="3"
-                          AutoGenerateColumns="False"
-                          IsReadOnly="True"
-                          SelectionMode="Single"
-                          SelectionUnit="FullRow"
-                          HeadersVisibility="Column"
-                          Background="#1E1E1E"
-                          Foreground="#D4D4D4"
-                          RowBackground="#1E1E1E"
-                          AlternatingRowBackground="#252526"
-                          GridLinesVisibility="None"
-                          BorderThickness="0"
-                          ColumnHeaderHeight="24"
-                          RowHeight="22"
-                          FontFamily="Consolas"
-                          FontSize="12"
-                          MouseDoubleClick="OnErrorListDoubleClick">
-                    <DataGrid.ColumnHeaderStyle>
-                        <Style TargetType="DataGridColumnHeader">
-                            <Setter Property="Background"   Value="#2D2D30" />
-                            <Setter Property="Foreground"   Value="#CCCCCC" />
-                            <Setter Property="Padding"      Value="6,0" />
-                            <Setter Property="BorderBrush"  Value="#3C3C3C" />
-                            <Setter Property="BorderThickness" Value="0,0,1,1" />
-                        </Style>
-                    </DataGrid.ColumnHeaderStyle>
-                    <DataGrid.Columns>
-                        <DataGridTextColumn Header="Sev"     Binding="{Binding Severity}" Width="45" />
-                        <DataGridTextColumn Header="Line"    Binding="{Binding Line}"     Width="50" />
-                        <DataGridTextColumn Header="Col"     Binding="{Binding Column}"   Width="50" />
-                        <DataGridTextColumn Header="Message" Binding="{Binding Message}"  Width="*" />
-                    </DataGrid.Columns>
-                </DataGrid>
-
-                <!-- Splitter between error list and output panel -->
-                <GridSplitter Grid.Row="4"
-                              Height="4"
-                              HorizontalAlignment="Stretch"
-                              Background="#3C3C3C"
-                              ResizeDirection="Rows" />
-
-                <!-- Output Panel -->
-                <Grid Grid.Row="5">
+                <!-- Bottom Panels Container (Error List + Output Panel) -->
+                <Grid Grid.Row="3" x:Name="bottomPanelsContainer">
                     <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="*" />
+                        <RowDefinition Height="*" MinHeight="32" x:Name="errorListRow" />
+                        <RowDefinition Height="4" x:Name="errorOutputSplitterRow" />
+                        <RowDefinition Height="*" MinHeight="28" x:Name="outputRow" />
                     </Grid.RowDefinitions>
-                    <Border Grid.Row="0" Background="#252526" Padding="6,2">
-                        <TextBlock Text="Output" Foreground="#9D9D9D" FontFamily="Consolas" FontSize="11" />
-                    </Border>
-                    <TextBox x:Name="outputPanel"
-                             Grid.Row="1"
-                             IsReadOnly="True"
-                             FontFamily="Consolas"
-                             FontSize="12"
-                             Background="#0C0C0C"
-                             Foreground="#CCCCCC"
-                             BorderThickness="0"
-                             Padding="6,4"
-                             VerticalScrollBarVisibility="Auto"
-                             HorizontalScrollBarVisibility="Auto"
-                             TextWrapping="NoWrap" />
+
+                        <!-- Error List Panel Container -->
+                        <Grid Grid.Row="0" x:Name="errorListPanelContainer">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="32" />
+                                <RowDefinition Height="*" x:Name="errorListContentRow" />
+                            </Grid.RowDefinitions>
+
+                            <!-- Error List Header Bar -->
+                            <Border Grid.Row="0" Background="#252526" Padding="6,4">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0"
+                                               Text="Errors"
+                                               Foreground="#9D9D9D"
+                                               FontFamily="Consolas"
+                                               FontSize="11"
+                                               VerticalAlignment="Center" />
+                                    <Button Grid.Column="1"
+                                            x:Name="toggleErrorListButton"
+                                            Content="▼"
+                                            Click="OnToggleErrorListClick"
+                                            Width="24"
+                                            Height="24"
+                                            Background="#2D2D30"
+                                            Foreground="#CCCCCC"
+                                            BorderThickness="1"
+                                            BorderBrush="#3C3C3C"
+                                            FontFamily="Consolas"
+                                            FontSize="12"
+                                            Cursor="Hand"
+                                            Padding="0" />
+                                </Grid>
+                            </Border>
+
+                            <!-- Error List DataGrid -->
+                            <DataGrid Grid.Row="1"
+                                      x:Name="errorList"
+                                      AutoGenerateColumns="False"
+                                      IsReadOnly="True"
+                                      SelectionMode="Single"
+                                      SelectionUnit="FullRow"
+                                      HeadersVisibility="Column"
+                                      Background="#1E1E1E"
+                                      Foreground="#D4D4D4"
+                                      RowBackground="#1E1E1E"
+                                      AlternatingRowBackground="#252526"
+                                      GridLinesVisibility="None"
+                                      BorderThickness="0"
+                                      ColumnHeaderHeight="24"
+                                      RowHeight="22"
+                                      FontFamily="Consolas"
+                                      FontSize="12"
+                                      MouseDoubleClick="OnErrorListDoubleClick">
+                                <DataGrid.ColumnHeaderStyle>
+                                    <Style TargetType="DataGridColumnHeader">
+                                        <Setter Property="Background"   Value="#2D2D30" />
+                                        <Setter Property="Foreground"   Value="#CCCCCC" />
+                                        <Setter Property="Padding"      Value="6,0" />
+                                        <Setter Property="BorderBrush"  Value="#3C3C3C" />
+                                        <Setter Property="BorderThickness" Value="0,0,1,1" />
+                                    </Style>
+                                </DataGrid.ColumnHeaderStyle>
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="Sev"     Binding="{Binding Severity}" Width="45" />
+                                    <DataGridTextColumn Header="Line"    Binding="{Binding Line}"     Width="50" />
+                                    <DataGridTextColumn Header="Col"     Binding="{Binding Column}"   Width="50" />
+                                    <DataGridTextColumn Header="Message" Binding="{Binding Message}"  Width="*" />
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </Grid>
+
+                        <!-- Splitter between error list and output panel -->
+                        <GridSplitter Grid.Row="1"
+                                      Height="4"
+                                      HorizontalAlignment="Stretch"
+                                      Background="#3C3C3C"
+                                      ResizeDirection="Rows"
+                                      x:Name="errorOutputSplitter" />
+
+                        <!-- Output Panel Container -->
+                        <Grid Grid.Row="2" x:Name="outputPanelContainer">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="28" />
+                                <RowDefinition Height="*" x:Name="outputContentRow" />
+                            </Grid.RowDefinitions>
+
+                            <!-- Output Header with Collapse Button -->
+                            <Border Grid.Row="0" Background="#252526" Padding="6,4">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0"
+                                               Text="Output"
+                                               Foreground="#9D9D9D"
+                                               FontFamily="Consolas"
+                                               FontSize="11"
+                                               VerticalAlignment="Center" />
+                                    <Button Grid.Column="1"
+                                            x:Name="toggleOutputButton"
+                                            Content="▼"
+                                            Click="OnToggleOutputClick"
+                                            Width="24"
+                                            Height="24"
+                                            Background="#2D2D30"
+                                            Foreground="#CCCCCC"
+                                            BorderThickness="1"
+                                            BorderBrush="#3C3C3C"
+                                            FontFamily="Consolas"
+                                            FontSize="12"
+                                            Cursor="Hand"
+                                            Padding="0" />
+                                </Grid>
+                            </Border>
+
+                            <!-- Output TextBox -->
+                            <TextBox Grid.Row="1"
+                                     x:Name="outputPanel"
+                                     IsReadOnly="True"
+                                     FontFamily="Consolas"
+                                     FontSize="12"
+                                     Background="#0C0C0C"
+                                     Foreground="#CCCCCC"
+                                     BorderThickness="0"
+                                     Padding="6,4"
+                                     VerticalScrollBarVisibility="Auto"
+                                     HorizontalScrollBarVisibility="Auto"
+                                     TextWrapping="NoWrap" />
+                        </Grid>
                 </Grid>
 
                 <!-- Status Bar -->
-                <Border Grid.Row="6" Background="#007ACC" Padding="8,4">
+                <Border Grid.Row="4" Background="#007ACC" Padding="8,4">
                     <TextBlock x:Name="statusLabel"
                                Text="Ready"
                                Foreground="White"

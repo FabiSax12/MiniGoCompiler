@@ -34,6 +34,10 @@ public partial class MainWindow : Window
     private ErrorHighlighter? _errorHighlighter;
     private Process? _currentBuildProcess;
 
+    // ── Panel collapse state ──────────────────────────────────────────────────
+    private bool _errorListCollapsed = false;
+    private bool _outputCollapsed = false;
+
     public MainWindow()
     {
         InitializeComponent();
@@ -170,6 +174,63 @@ public partial class MainWindow : Window
     {
         _errorHighlighter = new ErrorHighlighter();
         textEditor.TextArea.TextView.BackgroundRenderers.Add(_errorHighlighter);
+    }
+
+    #endregion
+
+    #region Panel Collapse/Expand
+
+    private void OnToggleErrorListClick(object sender, RoutedEventArgs e)
+    {
+        if (_errorListCollapsed)
+        {
+            // Expand: restore star sizing so the GridSplitter can redistribute freely
+            _errorListCollapsed = false;
+            errorListRow.Height        = new GridLength(1, GridUnitType.Star);
+            errorListContentRow.Height = new GridLength(1, GridUnitType.Star);
+            toggleErrorListButton.Content = "▼";
+        }
+        else
+        {
+            // Collapse: pin to header height only, give the freed space to output
+            _errorListCollapsed = true;
+            errorListRow.Height        = new GridLength(32, GridUnitType.Pixel);
+            errorListContentRow.Height = new GridLength(0, GridUnitType.Pixel);
+            toggleErrorListButton.Content = "▶";
+        }
+
+        UpdateSplitterVisibility();
+    }
+
+    private void OnToggleOutputClick(object sender, RoutedEventArgs e)
+    {
+        if (_outputCollapsed)
+        {
+            // Expand: restore star sizing
+            _outputCollapsed = false;
+            outputRow.Height        = new GridLength(1, GridUnitType.Star);
+            outputContentRow.Height = new GridLength(1, GridUnitType.Star);
+            toggleOutputButton.Content = "▼";
+        }
+        else
+        {
+            // Collapse: pin to header height only
+            _outputCollapsed = true;
+            outputRow.Height        = new GridLength(28, GridUnitType.Pixel);
+            outputContentRow.Height = new GridLength(0, GridUnitType.Pixel);
+            toggleOutputButton.Content = "▶";
+        }
+
+        UpdateSplitterVisibility();
+    }
+
+    // Hide the splitter between the two panels when either panel is collapsed —
+    // there is nothing to split between a full panel and a collapsed header.
+    private void UpdateSplitterVisibility()
+    {
+        bool showSplitter = !_errorListCollapsed && !_outputCollapsed;
+        errorOutputSplitterRow.Height  = showSplitter ? new GridLength(4) : new GridLength(0);
+        errorOutputSplitter.Visibility = showSplitter ? Visibility.Visible : Visibility.Collapsed;
     }
 
     #endregion
