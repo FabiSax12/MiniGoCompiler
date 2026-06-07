@@ -11,6 +11,8 @@
     <Window.InputBindings>
         <KeyBinding Key="F6" Command="{x:Static local:MainWindow.BuildCommand}" />
         <KeyBinding Key="F5" Command="{x:Static local:MainWindow.RunCommand}" />
+        <KeyBinding Key="S"  Modifiers="Ctrl"       Command="{x:Static local:MainWindow.SaveCommand}" />
+        <KeyBinding Key="O"  Modifiers="Ctrl+Shift" Command="{x:Static local:MainWindow.OpenFolderCommand}" />
     </Window.InputBindings>
     <Window.Resources>
         <Style TargetType="TreeViewItem">
@@ -28,9 +30,19 @@
         <!-- Menu Bar -->
         <Menu Grid.Row="0" Background="#2D2D30" Foreground="#CCCCCC">
             <MenuItem Header="_File" Foreground="#CCCCCC">
-                <MenuItem Header="_Open Folder..." Click="OnOpenFolderClick" InputGestureText="Ctrl+Shift+O" Foreground="#000000" Background="#FFFFFF" />
-                <MenuItem x:Name="menuCloseFolder" Header="_Close Folder" Click="OnCloseFolderClick" IsEnabled="False" Foreground="#000000" Background="#FFFFFF" />
-                <Separator />
+                <MenuItem Header="_Open Folder..."
+                          Command="{x:Static local:MainWindow.OpenFolderCommand}"
+                          InputGestureText="Ctrl+Shift+O"
+                          Foreground="#000000" Background="#FFFFFF" />
+                <MenuItem x:Name="menuCloseFolder" Header="_Close Folder"
+                          Click="OnCloseFolderClick"
+                          IsEnabled="False"
+                          Foreground="#000000" Background="#FFFFFF" />
+                <MenuItem x:Name="menuSave" Header="_Save"
+                          Command="{x:Static local:MainWindow.SaveCommand}"
+                          InputGestureText="Ctrl+S"
+                          IsEnabled="False"
+                          Foreground="#000000" Background="#FFFFFF" />
                 <MenuItem Header="E_xit" Click="OnExitClick" Foreground="#000000" Background="#FFFFFF" />
             </MenuItem>
         </Menu>
@@ -196,11 +208,23 @@
 
                 <!-- Tab/Title bar -->
                 <Border Grid.Row="0" Background="#2D2D30" Padding="8,4">
-                    <TextBlock x:Name="fileNameLabel"
-                               Text="No file open"
-                               Foreground="#9D9D9D"
-                               FontFamily="Consolas"
-                               FontSize="12" />
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                        <TextBlock x:Name="fileNameLabel"
+                                   Text="No file open"
+                                   Foreground="#9D9D9D"
+                                   FontFamily="Consolas"
+                                   FontSize="12"
+                                   VerticalAlignment="Center" />
+                        <TextBlock x:Name="unsavedLabel"
+                                   Text="unsaved changes"
+                                   Foreground="#CE9178"
+                                   FontFamily="Consolas"
+                                   FontSize="10"
+                                   FontStyle="Italic"
+                                   VerticalAlignment="Center"
+                                   Margin="10,0,0,0"
+                                   Visibility="Collapsed" />
+                    </StackPanel>
                 </Border>
 
                 <!-- AvalonEdit Editor -->

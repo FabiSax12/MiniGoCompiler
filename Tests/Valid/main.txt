@@ -1,4 +1,4 @@
-﻿package main;
+package main;
 
 type User struct {
     id, age int;
@@ -311,3 +311,5 @@ func main() {
 
     println("Program finished");
 };
+
+//Se pueden modificar los archivos de manera correcta!
