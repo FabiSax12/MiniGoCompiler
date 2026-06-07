@@ -236,6 +236,29 @@ public partial class MainWindow : Window
 
     #region Panel Drag-to-Resize
 
+    /// <summary>
+    /// Returns the maximum px the two panels can occupy combined so that
+    /// the editor row (*) keeps at least 25% of the editor-column grid height.
+    /// </summary>
+    private double MaxPanelsHeight()
+    {
+        // The parent of errorsPanelGrid is the Grid in Column 2.
+        // Its ActualHeight = TabBar + Editor + ErrorsPanel + OutputPanel + StatusBar.
+        double totalH = errorsPanelGrid.Parent is FrameworkElement col2
+            ? col2.ActualHeight
+            : ActualHeight;
+
+        // Fixed rows: TabBar (row 0) and StatusBar (row 4) — read actual rendered heights.
+        double tabBarH    = fileNameLabel.ActualHeight + 8 + 8; // text + top/bottom padding
+        double statusBarH = statusLabel.ActualHeight   + 8 + 8;
+
+        // Editor must keep at least 25% of the total column height.
+        double minEditorH = totalH * 0.25;
+
+        double maxPanels = totalH - tabBarH - statusBarH - minEditorH;
+        return Math.Max(0, maxPanels);
+    }
+
     // ── Errors drag handle ────────────────────────────────────────────────────
     private void OnErrorsDragHandleMouseDown(object sender, MouseButtonEventArgs e)
     {
@@ -250,8 +273,13 @@ public partial class MainWindow : Window
     private void OnErrorsDragHandleMouseMove(object sender, MouseEventArgs e)
     {
         if (!_errorsDragging) return;
-        double delta  = _errorsDragStartY - e.GetPosition(this).Y; // drag up = bigger panel
+        double delta  = _errorsDragStartY - e.GetPosition(this).Y;
         double newH   = Math.Max(32, _errorsDragStartH + delta);
+
+        // Clamp: errors + output combined must not starve the editor below 25%
+        double maxErrors = MaxPanelsHeight() - outputPanelRow.ActualHeight;
+        newH = Math.Min(newH, Math.Max(32, maxErrors));
+
         errorsPanelRow.Height = new GridLength(newH, GridUnitType.Pixel);
         e.Handled = true;
     }
@@ -278,8 +306,13 @@ public partial class MainWindow : Window
     private void OnOutputDragHandleMouseMove(object sender, MouseEventArgs e)
     {
         if (!_outputDragging) return;
-        double delta = _outputDragStartY - e.GetPosition(this).Y; // drag up = bigger panel
+        double delta = _outputDragStartY - e.GetPosition(this).Y;
         double newH  = Math.Max(32, _outputDragStartH + delta);
+
+        // Clamp: errors + output combined must not starve the editor below 25%
+        double maxOutput = MaxPanelsHeight() - errorsPanelRow.ActualHeight;
+        newH = Math.Min(newH, Math.Max(32, maxOutput));
+
         outputPanelRow.Height = new GridLength(newH, GridUnitType.Pixel);
         e.Handled = true;
     }
