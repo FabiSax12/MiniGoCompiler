@@ -34,9 +34,21 @@ public partial class MainWindow : Window
     private ErrorHighlighter? _errorHighlighter;
     private Process? _currentBuildProcess;
 
-    // ── Panel collapse state ──────────────────────────────────────────────────
-    private bool _errorListCollapsed = false;
-    private bool _outputCollapsed = false;
+    // ── Panel collapse / drag state ───────────────────────────────────────────
+    private bool   _errorListCollapsed = false;
+    private bool   _outputCollapsed    = false;
+    private double _savedErrorsHeight  = 130;
+    private double _savedOutputHeight  = 110;
+
+    // drag state for errors handle
+    private bool   _errorsDragging    = false;
+    private double _errorsDragStartY  = 0;
+    private double _errorsDragStartH  = 0;
+
+    // drag state for output handle
+    private bool   _outputDragging    = false;
+    private double _outputDragStartY  = 0;
+    private double _outputDragStartH  = 0;
 
     public MainWindow()
     {
@@ -184,53 +196,100 @@ public partial class MainWindow : Window
     {
         if (_errorListCollapsed)
         {
-            // Expand: restore star sizing so the GridSplitter can redistribute freely
             _errorListCollapsed = false;
-            errorListRow.Height        = new GridLength(1, GridUnitType.Star);
-            errorListContentRow.Height = new GridLength(1, GridUnitType.Star);
+            errorsContentRow.Height = new GridLength(1, GridUnitType.Star);
+            errorsPanelRow.Height   = new GridLength(_savedErrorsHeight, GridUnitType.Pixel);
             toggleErrorListButton.Content = "▼";
         }
         else
         {
-            // Collapse: pin to header height only, give the freed space to output
+            _savedErrorsHeight = errorsPanelRow.ActualHeight > 0
+                ? errorsPanelRow.ActualHeight : _savedErrorsHeight;
             _errorListCollapsed = true;
-            errorListRow.Height        = new GridLength(32, GridUnitType.Pixel);
-            errorListContentRow.Height = new GridLength(0, GridUnitType.Pixel);
+            errorsContentRow.Height = new GridLength(0, GridUnitType.Pixel);
+            errorsPanelRow.Height   = new GridLength(1, GridUnitType.Auto);
             toggleErrorListButton.Content = "▶";
         }
-
-        UpdateSplitterVisibility();
     }
 
     private void OnToggleOutputClick(object sender, RoutedEventArgs e)
     {
         if (_outputCollapsed)
         {
-            // Expand: restore star sizing
             _outputCollapsed = false;
-            outputRow.Height        = new GridLength(1, GridUnitType.Star);
             outputContentRow.Height = new GridLength(1, GridUnitType.Star);
+            outputPanelRow.Height   = new GridLength(_savedOutputHeight, GridUnitType.Pixel);
             toggleOutputButton.Content = "▼";
         }
         else
         {
-            // Collapse: pin to header height only
+            _savedOutputHeight = outputPanelRow.ActualHeight > 0
+                ? outputPanelRow.ActualHeight : _savedOutputHeight;
             _outputCollapsed = true;
-            outputRow.Height        = new GridLength(28, GridUnitType.Pixel);
             outputContentRow.Height = new GridLength(0, GridUnitType.Pixel);
+            outputPanelRow.Height   = new GridLength(1, GridUnitType.Auto);
             toggleOutputButton.Content = "▶";
         }
-
-        UpdateSplitterVisibility();
     }
 
-    // Hide the splitter between the two panels when either panel is collapsed —
-    // there is nothing to split between a full panel and a collapsed header.
-    private void UpdateSplitterVisibility()
+    #endregion
+
+    #region Panel Drag-to-Resize
+
+    // ── Errors drag handle ────────────────────────────────────────────────────
+    private void OnErrorsDragHandleMouseDown(object sender, MouseButtonEventArgs e)
     {
-        bool showSplitter = !_errorListCollapsed && !_outputCollapsed;
-        errorOutputSplitterRow.Height  = showSplitter ? new GridLength(4) : new GridLength(0);
-        errorOutputSplitter.Visibility = showSplitter ? Visibility.Visible : Visibility.Collapsed;
+        if (_errorListCollapsed) return;
+        _errorsDragging   = true;
+        _errorsDragStartY = e.GetPosition(this).Y;
+        _errorsDragStartH = errorsPanelRow.ActualHeight;
+        errorsDragHandle.CaptureMouse();
+        e.Handled = true;
+    }
+
+    private void OnErrorsDragHandleMouseMove(object sender, MouseEventArgs e)
+    {
+        if (!_errorsDragging) return;
+        double delta  = _errorsDragStartY - e.GetPosition(this).Y; // drag up = bigger panel
+        double newH   = Math.Max(32, _errorsDragStartH + delta);
+        errorsPanelRow.Height = new GridLength(newH, GridUnitType.Pixel);
+        e.Handled = true;
+    }
+
+    private void OnErrorsDragHandleMouseUp(object sender, MouseButtonEventArgs e)
+    {
+        if (!_errorsDragging) return;
+        _errorsDragging = false;
+        errorsDragHandle.ReleaseMouseCapture();
+        e.Handled = true;
+    }
+
+    // ── Output drag handle ────────────────────────────────────────────────────
+    private void OnOutputDragHandleMouseDown(object sender, MouseButtonEventArgs e)
+    {
+        if (_outputCollapsed) return;
+        _outputDragging   = true;
+        _outputDragStartY = e.GetPosition(this).Y;
+        _outputDragStartH = outputPanelRow.ActualHeight;
+        outputDragHandle.CaptureMouse();
+        e.Handled = true;
+    }
+
+    private void OnOutputDragHandleMouseMove(object sender, MouseEventArgs e)
+    {
+        if (!_outputDragging) return;
+        double delta = _outputDragStartY - e.GetPosition(this).Y; // drag up = bigger panel
+        double newH  = Math.Max(32, _outputDragStartH + delta);
+        outputPanelRow.Height = new GridLength(newH, GridUnitType.Pixel);
+        e.Handled = true;
+    }
+
+    private void OnOutputDragHandleMouseUp(object sender, MouseButtonEventArgs e)
+    {
+        if (!_outputDragging) return;
+        _outputDragging = false;
+        outputDragHandle.ReleaseMouseCapture();
+        e.Handled = true;
     }
 
     #endregion
