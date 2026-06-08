@@ -12,6 +12,7 @@
         <KeyBinding Key="F6" Command="{x:Static local:MainWindow.BuildCommand}" />
         <KeyBinding Key="F5" Command="{x:Static local:MainWindow.RunCommand}" />
         <KeyBinding Key="S"  Modifiers="Ctrl"       Command="{x:Static local:MainWindow.SaveCommand}" />
+        <KeyBinding Key="O"  Modifiers="Ctrl"       Command="{x:Static local:MainWindow.OpenFileCommand}" />
         <KeyBinding Key="O"  Modifiers="Ctrl+Shift" Command="{x:Static local:MainWindow.OpenFolderCommand}" />
     </Window.InputBindings>
     <Window.Resources>
@@ -26,6 +27,10 @@
         <!-- Menu Bar -->
         <Menu Grid.Row="0" Background="#2D2D30" Foreground="#CCCCCC">
             <MenuItem Header="_File" Foreground="#CCCCCC">
+                <MenuItem Header="_Open File..."
+                          Command="{x:Static local:MainWindow.OpenFileCommand}"
+                          InputGestureText="Ctrl+O"
+                          Foreground="#000000" Background="#FFFFFF" />
                 <MenuItem Header="_Open Folder..."
                           Command="{x:Static local:MainWindow.OpenFolderCommand}"
                           InputGestureText="Ctrl+Shift+O"
@@ -319,16 +324,24 @@
                                    FontSize="32" FontWeight="Bold"
                                    Foreground="#CCCCCC" TextAlignment="Center"
                                    FontFamily="Consolas" Margin="0,0,0,10" />
-                        <TextBlock Text="Open a folder to get started"
+                        <TextBlock Text="Open a file or folder to get started"
                                    FontSize="16" Foreground="#808080"
                                    TextAlignment="Center" FontFamily="Consolas"
                                    Margin="0,0,0,20" />
-                        <Button x:Name="welcomeOpenFolderButton"
-                                Content="📁 Open Folder" Click="OnOpenFolderClick"
-                                Width="200" Height="50" FontSize="16"
-                                FontFamily="Consolas" Background="#007ACC"
-                                Foreground="White" BorderThickness="0"
-                                Cursor="Hand" HorizontalAlignment="Center" />
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                            <Button x:Name="welcomeOpenFileButton"
+                                    Content="📄 Open File" Click="OnOpenFileClick"
+                                    Width="190" Height="50" FontSize="16"
+                                    FontFamily="Consolas" Background="#0E639C"
+                                    Foreground="White" BorderThickness="0"
+                                    Cursor="Hand" Margin="0,0,8,0" />
+                            <Button x:Name="welcomeOpenFolderButton"
+                                    Content="📁 Open Folder" Click="OnOpenFolderClick"
+                                    Width="190" Height="50" FontSize="16"
+                                    FontFamily="Consolas" Background="#007ACC"
+                                    Foreground="White" BorderThickness="0"
+                                    Cursor="Hand" />
+                        </StackPanel>
                     </StackPanel>
                 </Grid>
 
