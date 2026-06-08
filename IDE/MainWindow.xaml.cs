@@ -29,6 +29,7 @@ public partial class MainWindow : Window
     public static readonly RoutedCommand BuildCommand      = new();
     public static readonly RoutedCommand RunCommand        = new();
     public static readonly RoutedCommand SaveCommand       = new();
+    public static readonly RoutedCommand OpenFileCommand   = new();
     public static readonly RoutedCommand OpenFolderCommand = new();
 
     private string? _currentFilePath;
@@ -78,6 +79,7 @@ public partial class MainWindow : Window
         textEditor.TextChanged += OnEditorTextChanged;
         textEditor.TextArea.KeyDown += OnEditorKeyDown;
         fileTree.MouseDoubleClick += OnFileTreeMouseDoubleClick;
+        fileTree.PreviewMouseLeftButtonDown += OnFileTreePreviewMouseLeftButtonDown;
         fileTree.AddHandler(TreeViewItem.ExpandedEvent, new RoutedEventHandler(OnTreeViewItemExpanded), true);
         UpdateStatus("Open a folder to get started");
     }
@@ -104,10 +106,17 @@ public partial class MainWindow : Window
         {
             _rootFolder = path;
             var roots = new System.Collections.ObjectModel.ObservableCollection<FileSystemNode>();
-            var root = new FileSystemNode(path, isDirectory: true);
-            
-            root.IsExpanded = true;
-            roots.Add(root);
+
+            foreach (var dir in Directory.GetDirectories(path).OrderBy(d => d))
+                roots.Add(new FileSystemNode(dir, isDirectory: true));
+
+            foreach (var file in Directory.GetFiles(path)
+                .Where(f => Path.GetExtension(f) is ".txt" or ".g" or ".go")
+                .OrderBy(f => f))
+            {
+                roots.Add(new FileSystemNode(file, isDirectory: false));
+            }
+
             fileTree.ItemsSource = roots;
             folderPathLabel.Text = Path.GetFileName(path);
             welcomeOverlay.Visibility = Visibility.Collapsed;
@@ -119,6 +128,20 @@ public partial class MainWindow : Window
         catch (Exception ex)
         {
             UpdateStatus($"Error opening folder: {ex.Message}");
+        }
+    }
+
+    private void OnOpenFileClick(object sender, RoutedEventArgs e)
+    {
+        var dialog = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "Open a MiniGo or Go source file",
+            Filter = "MiniGo/Go files (*.g;*.go;*.txt)|*.g;*.go;*.txt|All files (*.*)|*.*",
+            Multiselect = false,
+        };
+        if (dialog.ShowDialog() == true)
+        {
+            OpenFileStandalone(dialog.FileName);
         }
     }
 
@@ -161,9 +184,48 @@ public partial class MainWindow : Window
         }
     }
 
+    /// <summary>
+    /// Single-click toggles expand/collapse for directory nodes.
+    /// </summary>
+    private void OnFileTreePreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        var item = FindAncestor<TreeViewItem>(e.OriginalSource as DependencyObject);
+        if (item?.DataContext is FileSystemNode node && node.IsDirectory)
+        {
+            node.IsExpanded = !node.IsExpanded;
+        }
+    }
+
+    private static T? FindAncestor<T>(DependencyObject? current) where T : DependencyObject
+    {
+        while (current != null)
+        {
+            if (current is T found) return found;
+            current = VisualTreeHelper.GetParent(current);
+        }
+        return null;
+    }
+
     #endregion
 
     #region File Operations
+
+    private void OpenFileStandalone(string path)
+    {
+        OpenFile(path);
+
+        var roots = new System.Collections.ObjectModel.ObservableCollection<FileSystemNode>();
+        var file = new FileSystemNode(path, false);
+        
+        roots.Add(file);
+        fileTree.ItemsSource = roots;
+        welcomeOverlay.Visibility = Visibility.Collapsed;
+        explorerOpenFolderButton.Visibility = Visibility.Hidden;
+        explorerCloseFolderButton.Visibility = Visibility.Visible;
+        menuCloseFolder.IsEnabled = true;
+        folderPathLabel.Text = Path.GetFileName(path);
+        UpdateStatus($"Opened: {path}");
+    }
 
     private void OpenFile(string path)
     {
@@ -518,6 +580,7 @@ public partial class MainWindow : Window
         CommandBindings.Add(new CommandBinding(BuildCommand,      async (_, _) => await ExecuteBuildAsync()));
         CommandBindings.Add(new CommandBinding(RunCommand,        async (_, _) => await ExecuteRunAsync()));
         CommandBindings.Add(new CommandBinding(SaveCommand,       (_, _) => ExecuteSave()));
+        CommandBindings.Add(new CommandBinding(OpenFileCommand,   (_, _) => OnOpenFileClick(this, new RoutedEventArgs())));
         CommandBindings.Add(new CommandBinding(OpenFolderCommand, (_, _) => OnOpenFolderClick(this, new RoutedEventArgs())));
     }
 
