@@ -4,21 +4,19 @@
  * ============================================================================
  *
  * Output Esperado:
- *   Compilacion exitosa. Sin errores sintacticos ni semanticos.
- *   Salida: imprime resultados de llamadas a funciones, len,
- *           print, println, acceso a structs y arreglos.
+ *   El resto del archivo compila exitosamente (parser y type checker OK).
+ *   imprime los resultados de cada rama de control de flujo
  *
  * Cobertura de Tokens:
- *   FUNC, RETURN, LEN, PRINT, PRINTLN
- *   (APPEND y CAP se omiten por limitacion del encoder)
+ *   FUNC, RETURN, LEN, PRINT, PRINTLN, APPEND, CAP
  *
  * Cobertura de Rules:
  *   funcDecl, funcFrontDecl (con/sin parametros, con/sin tipo de retorno)
  *   funcArgDecls (0, 1, N parametros)
  *   arguments: ( expressionList | epsilon )
  *   lengthExpression: LEN ( expr )
- *   capExpression: CAP ( expr ) — parseado pero no soportado por encoder
- *   appendExpression: APPEND ( expr , expr ) — parseado pero no soportado
+ *   capExpression: CAP ( expr ) — encoder lanza error
+ *   appendExpression: APPEND ( expr , expr ) — encoder lanza error
  *   statement: PRINT, PRINTLN (con/sin expressionList)
  *   primaryExpression: selector (struct), index (array), arguments (call)
  *   identifierList + coma en argumentos de llamada
@@ -181,6 +179,26 @@ func sumAll(a int, b int, c int, d int) int {
 };
 
 // ============================================================
+// capExpression: CAP ( expr ) — debe fallar en encoder
+// ============================================================
+func testCap() {
+    println("=== Cap ===");
+    var arr [5]int;
+    var c int = cap(arr);
+    println(c);
+};
+
+// ============================================================
+// appendExpression: APPEND ( expr , expr ) — debe fallar en encoder
+// ============================================================
+func testAppend() {
+    println("=== Append ===");
+    var src [5]int;
+    var dst [5]int;
+    dst = append(dst, src);
+};
+
+// ============================================================
 // MAIN
 // ============================================================
 func main() {
@@ -215,6 +233,9 @@ func main() {
     testStructOps();
 
     println("sumAll:", sumAll(1, 2, 3, 4));
+
+    testCap();
+    testAppend();
 
     println("=== Functions & Builtins Complete ===");
 };

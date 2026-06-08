@@ -10,7 +10,7 @@
  * Cobertura de Tokens:
  *   IF, ELSE, FOR, SWITCH, CASE, DEFAULT, BREAK, RETURN,
  *   PRINT, PRINTLN
- *   (CONTINUE se omite por limitacion del encoder)
+ *   CONTINUE
  *
  * Cobertura de Rules:
  *   ifStatement (6 formas):
@@ -27,16 +27,15 @@
  *     3. FOR simpleStatement ; expression ; simpleStatement block
  *     4. FOR simpleStatement ; ; simpleStatement block
  *
- *   switch (2 formas usables en encoder, 4 en parser):
+ *   switch (4 formas):
  *     1. SWITCH simpleStatement ; expression { ... }
  *     2. SWITCH expression { ... }
- *     (Formas 3 y 4 —bare switch— aceptadas por el parser pero no
- *      soportadas por el encoder actual)
+ *     3. SWITCH simpleStatement ; { ... }  (bare switch con init)
+ *     4. SWITCH { ... }                     (bare switch sin init ni expr)
  *
- *   statement (11 formas): PRINT, PRINTLN, RETURN (con/sin expr),
- *     BREAK, simpleStatement, block, switch, ifStatement,
+ *   statement (12 formas): PRINT, PRINTLN, RETURN (con/sin expr),
+ *     BREAK, CONTINUE, simpleStatement, block, switch, ifStatement,
  *     loop, typeDecl, variableDecl
- *     (CONTINUE se omite por limitacion del encoder)
  *
  *   expressionCaseClauseList, expressionCaseClause,
  *   expressionSwitchCase (CASE, DEFAULT)
@@ -219,6 +218,44 @@ func testBreak() {
 };
 
 // ============================================================
+// CONTINUE: todas las formas de loop
+// ============================================================
+func testContinue() {
+    println("=== Continue ===");
+
+    // Continue en for clasico — saltar pares
+    for n := 1; n <= 5; n++ {
+        if n % 2 == 0 {
+            continue;
+        };
+        println("odd:", n);
+    };
+
+    // Continue en for estilo-while
+    var j int = 0;
+    for j < 5 {
+        j++;
+        if j == 3 {
+            continue;
+        };
+        println("skip3:", j);
+    };
+
+    // Continue en for infinito
+    var k int = 0;
+    for {
+        k++;
+        if k > 5 {
+            break;
+        };
+        if k == 3 {
+            continue;
+        };
+        println("inf:", k);
+    };
+};
+
+// ============================================================
 // switch: Forma 1 — SWITCH simpleStatement ; exp { ... }
 // ============================================================
 func switchForm1() {
@@ -265,6 +302,36 @@ func switchEpsilonInit() {
             println("epsilon init ok");
         default:
             println("default");
+    };
+};
+
+// ============================================================
+// switch: Forma 3 — bare switch con init (SWITCH simpleStatement ; { ... })
+// ============================================================
+func switchForm3() {
+    println("=== Switch Forma 3 ===");
+    switch x := 15; {
+        case x > 100:
+            println("x > 100");
+        case x > 10:
+            println("x > 10");
+        default:
+            println("x <= 10");
+    };
+};
+
+// ============================================================
+// switch: Forma 4 — bare switch sin init ni expr (SWITCH { ... })
+// ============================================================
+func switchForm4(x int) {
+    println("=== Switch Forma 4 ===");
+    switch {
+        case x > 0:
+            println("positive");
+        case x < 0:
+            println("negative");
+        default:
+            println("zero");
     };
 };
 
@@ -359,6 +426,7 @@ func main() {
     loopFormEpsilonInit();
 
     testBreak();
+    testContinue();
 
     switchForm1();
     switchForm2(1);
@@ -366,6 +434,10 @@ func main() {
     switchForm2(4);
     switchForm2(7);
     switchEpsilonInit();
+    switchForm3();
+    switchForm4(5);
+    switchForm4(-3);
+    switchForm4(0);
     switchEmpty();
 
     var r int = returnWithExpr(10);
