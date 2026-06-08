@@ -78,6 +78,7 @@ public partial class MainWindow : Window
         textEditor.TextChanged += OnEditorTextChanged;
         textEditor.TextArea.KeyDown += OnEditorKeyDown;
         fileTree.MouseDoubleClick += OnFileTreeMouseDoubleClick;
+        fileTree.PreviewMouseLeftButtonDown += OnFileTreePreviewMouseLeftButtonDown;
         fileTree.AddHandler(TreeViewItem.ExpandedEvent, new RoutedEventHandler(OnTreeViewItemExpanded), true);
         UpdateStatus("Open a folder to get started");
     }
@@ -159,6 +160,28 @@ public partial class MainWindow : Window
         {
             node.EnsureLoaded();
         }
+    }
+
+    /// <summary>
+    /// Single-click toggles expand/collapse for directory nodes.
+    /// </summary>
+    private void OnFileTreePreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        var item = FindAncestor<TreeViewItem>(e.OriginalSource as DependencyObject);
+        if (item?.DataContext is FileSystemNode node && node.IsDirectory)
+        {
+            node.IsExpanded = !node.IsExpanded;
+        }
+    }
+
+    private static T? FindAncestor<T>(DependencyObject? current) where T : DependencyObject
+    {
+        while (current != null)
+        {
+            if (current is T found) return found;
+            current = VisualTreeHelper.GetParent(current);
+        }
+        return null;
     }
 
     #endregion

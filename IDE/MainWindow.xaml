@@ -15,10 +15,6 @@
         <KeyBinding Key="O"  Modifiers="Ctrl+Shift" Command="{x:Static local:MainWindow.OpenFolderCommand}" />
     </Window.InputBindings>
     <Window.Resources>
-        <Style TargetType="TreeViewItem">
-            <Setter Property="FontFamily" Value="Consolas" />
-            <Setter Property="FontSize" Value="13" />
-        </Style>
     </Window.Resources>
     <Grid>
         <Grid.RowDefinitions>
@@ -128,14 +124,72 @@
                                 <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}" />
                                 <Setter Property="IsSelected" Value="{Binding IsSelected, Mode=TwoWay}" />
                                 <Setter Property="Foreground" Value="#CCCCCC" />
+                                <Setter Property="Background" Value="Transparent" />
+                                <Setter Property="Padding" Value="2,1" />
+                                <Setter Property="Template">
+                                    <Setter.Value>
+                                        <ControlTemplate TargetType="TreeViewItem">
+                                            <StackPanel>
+                                                <Border x:Name="Bd"
+                                                        Background="{TemplateBinding Background}"
+                                                        Padding="{TemplateBinding Padding}">
+                                                    <ContentPresenter x:Name="PART_Header"
+                                                                      ContentSource="Header"
+                                                                      VerticalAlignment="Center" />
+                                                </Border>
+                                                <ItemsPresenter x:Name="ItemsHost"
+                                                                Visibility="Collapsed"
+                                                                Margin="18,0,0,0" />
+                                            </StackPanel>
+                                            <ControlTemplate.Triggers>
+                                                <Trigger Property="IsExpanded" Value="True">
+                                                    <Setter TargetName="ItemsHost"
+                                                            Property="Visibility"
+                                                            Value="Visible" />
+                                                </Trigger>
+                                                <Trigger SourceName="Bd" Property="IsMouseOver" Value="True">
+                                                    <Setter TargetName="Bd"
+                                                            Property="Background"
+                                                            Value="#2A2D2E" />
+                                                </Trigger>
+                                                <Trigger Property="IsSelected" Value="True">
+                                                    <Setter TargetName="Bd"
+                                                            Property="Background"
+                                                            Value="#37373D" />
+                                                </Trigger>
+                                            </ControlTemplate.Triggers>
+                                        </ControlTemplate>
+                                    </Setter.Value>
+                                </Setter>
                             </Style>
                         </TreeView.ItemContainerStyle>
                         <TreeView.ItemTemplate>
                             <HierarchicalDataTemplate ItemsSource="{Binding Children}">
                                 <StackPanel Orientation="Horizontal" Margin="1">
-                                    <TextBlock Text="{Binding Name}" Foreground="#CCCCCC" FontFamily="Consolas"
-                                               FontSize="13" />
+                                    <TextBlock x:Name="ItemIcon"
+                                               Text="{Binding IconText}"
+                                               FontFamily="Segoe UI Emoji" FontSize="14"
+                                               Foreground="#808080"
+                                               Width="20" TextAlignment="Center"
+                                               Margin="0,0,4,0"
+                                               VerticalAlignment="Center" />
+                                    <TextBlock Text="{Binding Name}"
+                                               Foreground="#CCCCCC"
+                                               FontFamily="Consolas" FontSize="13"
+                                               VerticalAlignment="Center" />
                                 </StackPanel>
+                                <HierarchicalDataTemplate.Triggers>
+                                    <DataTrigger Binding="{Binding IsDirectory}" Value="True">
+                                        <Setter TargetName="ItemIcon"
+                                                Property="Foreground"
+                                                Value="#DCB67A" />
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding IsGoFile}" Value="True">
+                                        <Setter TargetName="ItemIcon"
+                                                Property="Foreground"
+                                                Value="#00ADD8" />
+                                    </DataTrigger>
+                                </HierarchicalDataTemplate.Triggers>
                             </HierarchicalDataTemplate>
                         </TreeView.ItemTemplate>
                     </TreeView>

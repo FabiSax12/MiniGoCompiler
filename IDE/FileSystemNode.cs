@@ -24,7 +24,11 @@ public class FileSystemNode : INotifyPropertyChanged
     public bool IsExpanded
     {
         get => _isExpanded;
-        set => SetField(ref _isExpanded, value);
+        set
+        {
+            if (SetField(ref _isExpanded, value))
+                OnPropertyChanged(nameof(IconText));
+        }
     }
 
     public bool IsSelected
@@ -32,6 +36,22 @@ public class FileSystemNode : INotifyPropertyChanged
         get => _isSelected;
         set => SetField(ref _isSelected, value);
     }
+
+    /// <summary>
+    /// Emoji icon based on node type and state.
+    /// Directories: 📁 (closed) / 📂 (expanded).
+    /// .g files: 🔹, other files: 📄.
+    /// </summary>
+    public string IconText => IsDirectory
+        ? (IsExpanded ? "📂" : "📁")
+        : Name.EndsWith(".g", StringComparison.OrdinalIgnoreCase)
+            ? "🔹"
+            : "📄";
+
+    /// <summary>
+    /// True for .g (MiniGo source) file nodes.
+    /// </summary>
+    public bool IsGoFile => !IsDirectory && Name.EndsWith(".g", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Creates a node. For directory nodes, adds a placeholder child until expanded.
