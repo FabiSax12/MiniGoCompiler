@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="utf-8"?>
+<SyntaxDefinition name="MiniGo" xmlns="http://icsharpcode.net/sharpdevelop/syntaxdefinition/2008">
+
+  <Color name="Comment"       foreground="#6A9955" />
+  <Color name="Keyword"       foreground="#569CD6" fontWeight="normal" />
+  <Color name="Type"          foreground="#4EC9B0" />
+  <Color name="String"        foreground="#CE9178" />
+  <Color name="Number"        foreground="#B5CEA8" />
+  <Color name="Builtin"       foreground="#DCDCAA" />
+  <Color name="BoolLiteral"   foreground="#569CD6" />
+
+  <RuleSet>
+
+    <!-- Block comments  /* ... */ -->
+    <Span color="Comment" multiline="true">
+      <Begin>/\*</Begin>
+      <End>\*/</End>
+    </Span>
+
+    <!-- Line comments  // ... -->
+    <Span color="Comment">
+      <Begin>//</Begin>
+    </Span>
+
+    <!-- Raw string literals  `...` -->
+    <Span color="String" multiline="true">
+      <Begin>`</Begin>
+      <End>`</End>
+    </Span>
+
+    <!-- Interpreted string literals  "..." -->
+    <Span color="String">
+      <Begin>"</Begin>
+      <End>"</End>
+      <RuleSet>
+        <Span begin="\\" end="." />
+      </RuleSet>
+    </Span>
+
+    <!-- Rune literals  '.' -->
+    <Span color="String">
+      <Begin>'</Begin>
+      <End>'</End>
+      <RuleSet>
+        <Span begin="\\" end="." />
+      </RuleSet>
+    </Span>
+
+    <Keywords color="BoolLiteral">
+      <Word>true</Word>
+      <Word>false</Word>
+    </Keywords>
+
+    <!-- Built-in functions -->
+    <Keywords color="Builtin">
+      <Word>println</Word>
+      <Word>print</Word>
+      <Word>len</Word>
+      <Word>cap</Word>
+      <Word>append</Word>
+    </Keywords>
+
+    <!-- Control flow and declaration keywords -->
+    <Keywords color="Keyword">
+      <Word>package</Word>
+      <Word>import</Word>
+      <Word>func</Word>
+      <Word>var</Word>
+      <Word>type</Word>
+      <Word>struct</Word>
+      <Word>if</Word>
+      <Word>else</Word>
+      <Word>for</Word>
+      <Word>switch</Word>
+      <Word>case</Word>
+      <Word>default</Word>
+      <Word>return</Word>
+      <Word>break</Word>
+      <Word>continue</Word>
+    </Keywords>
+
+    <!-- Primitive types -->
+    <Keywords color="Type">
+      <Word>int</Word>
+      <Word>float</Word>
+      <Word>bool</Word>
+      <Word>string</Word>
+      <Word>rune</Word>
+      <Word>void</Word>
+    </Keywords>
+
+    <!-- Numeric literals: floats before ints so 3.14 matches first -->
+    <Rule color="Number">
+      \b\d+\.\d*([eE][+-]?\d+)?\b
+    </Rule>
+    <Rule color="Number">
+      \b\d+\b
+    </Rule>
+
+  </RuleSet>
+</SyntaxDefinition>

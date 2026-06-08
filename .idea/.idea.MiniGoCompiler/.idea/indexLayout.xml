@@ -6,6 +6,8 @@
       <Path>.gitignore</Path>
       <Path>README.md</Path>
       <Path>Tests</Path>
+      <Path>revision</Path>
+      <Path>samples</Path>
     </explicitIncludes>
     <explicitExcludes />
   </component>

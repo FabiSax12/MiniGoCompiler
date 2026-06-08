@@ -165,7 +165,10 @@ public class TypeChecker : MiniGoParserBaseVisitor<object>
 			}
 			else
 			{
-				_scopeTracker.Track(symbol);
+				if (context.Parent is not MiniGoParser.StructMemDeclsContext)
+				{
+					_scopeTracker.Track(symbol);
+				}
 			}
 		}
 

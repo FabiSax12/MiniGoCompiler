@@ -11,3 +11,11 @@ func main() {
 	println("ok");
 	print(temp);
 };
+
+/*
+
+Se agregó un buffer por archivo 
+que permita mantener cambios sin 
+guardar al cambiar de archivo sin perderlos
+
+*/

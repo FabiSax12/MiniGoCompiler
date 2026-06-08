@@ -47,3 +47,6 @@ vssver.scc
 
 # Ignorar resultados de compilación del CLI de .NET
 out/
+
+# Ignorar archivos generados de LLVM IR (generados localmente)
+*.ll

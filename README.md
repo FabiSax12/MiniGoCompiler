@@ -91,6 +91,38 @@ dotnet restore
 
 ---
 
+# 7. Instalar LLVM (requerido para ejecutar archivos .ll)
+
+El compilador genera código LLVM IR (archivos `.ll`). Para **ejecutar** esos archivos desde el IDE (botón Run / F5) se necesita `lli`, el intérprete de LLVM.
+
+## Opción A — winget (recomendado en Windows)
+
+```powershell
+winget install LLVM.LLVM
+```
+
+Esto instala LLVM en `C:\Program Files\LLVM\bin\` y agrega el directorio al PATH automáticamente.
+
+## Opción B — instalador oficial
+
+Descargar el instalador Windows desde:
+
+https://releases.llvm.org/download.html
+
+Durante la instalación, seleccionar **"Add LLVM to the system PATH"**.
+
+## Verificar instalación
+
+```powershell
+lli --version
+```
+
+Si el comando no se encuentra después de instalar, reiniciar la terminal o el IDE para que tome el nuevo PATH.
+
+> **Nota:** El compilador (build) no requiere LLVM instalado — solo se necesita para la fase de ejecución.
+
+---
+
 # Dependencias utilizadas
 
 ```xml
