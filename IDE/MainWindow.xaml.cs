@@ -24,12 +24,29 @@ namespace IDE;
 /// </summary>
 public partial class MainWindow : Window
 {
-    // ── RoutedCommands for F5/F6 key bindings declared in XAML ──────────────
-    public static readonly RoutedCommand BuildCommand = new();
-    public static readonly RoutedCommand RunCommand   = new();
+    // ── RoutedCommands for key bindings declared in XAML ────────────────────
+    public static readonly RoutedCommand BuildCommand      = new();
+    public static readonly RoutedCommand RunCommand        = new();
+    public static readonly RoutedCommand SaveCommand       = new();
+    public static readonly RoutedCommand OpenFolderCommand = new();
 
     private string? _currentFilePath;
     private string? _rootFolder;
+    private bool    _hasUnsavedChanges = false;
+
+    /// <summary>
+    /// Tracks which files have unsaved changes (true = dirty) by absolute path.
+    /// Survives switching between files in the explorer.
+    /// </summary>
+    private readonly Dictionary<string, bool>   _dirtyFiles   = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// In-memory buffer for each file that has been opened in this session.
+    /// When the user switches to another file, the current editor content is flushed
+    /// here instead of being discarded. On switching back the buffer is restored so
+    /// unsaved edits are never lost.
+    /// </summary>
+    private readonly Dictionary<string, string> _fileBuffers  = new(StringComparer.OrdinalIgnoreCase);
     private DispatcherTimer _compileDebounceTimer = null!;
     private ErrorHighlighter? _errorHighlighter;
     private Process? _currentBuildProcess;
@@ -148,10 +165,30 @@ public partial class MainWindow : Window
     {
         try
         {
-            string content = File.ReadAllText(path);
+            // ── Flush the current file into the in-memory buffer before switching ──
+            if (_currentFilePath != null)
+            {
+                _fileBuffers[_currentFilePath] = textEditor.Text;
+                _dirtyFiles[_currentFilePath]  = _hasUnsavedChanges;
+            }
+
             _currentFilePath = path;
+
+            // ── Load: prefer the in-memory buffer so unsaved edits are preserved ──
+            string content = _fileBuffers.TryGetValue(path, out string? buffered)
+                ? buffered
+                : File.ReadAllText(path);
+
+            // Suppress TextChanged while loading so it doesn't mark the file dirty.
+            textEditor.TextChanged -= OnEditorTextChanged;
             textEditor.Text = content;
-            fileNameLabel.Text = Path.GetFileName(path);
+            textEditor.TextChanged += OnEditorTextChanged;
+
+            // Restore dirty state for this file.
+            _hasUnsavedChanges = _dirtyFiles.TryGetValue(path, out bool wasDirty) && wasDirty;
+            UpdateFileNameLabel();
+            menuSave.IsEnabled = _hasUnsavedChanges;
+
             _errorHighlighter?.ClearErrors();
             TriggerCompilation();
         }
@@ -161,21 +198,55 @@ public partial class MainWindow : Window
         }
     }
 
+    /// <summary>
+    /// Saves the current editor content to disk.
+    /// Called by Ctrl+S KeyBinding and the File → Save menu item.
+    /// </summary>
+    private void ExecuteSave()
+    {
+        if (_currentFilePath == null || !_hasUnsavedChanges)
+            return;
+
+        try
+        {
+            File.WriteAllText(_currentFilePath, textEditor.Text);
+            _hasUnsavedChanges = false;
+            _dirtyFiles[_currentFilePath]  = false;
+            _fileBuffers.Remove(_currentFilePath); // disk is now the source of truth
+            UpdateFileNameLabel();
+            menuSave.IsEnabled = false;
+            UpdateStatus($"Saved: {Path.GetFileName(_currentFilePath)}");
+        }
+        catch (Exception ex)
+        {
+            UpdateStatus($"Save failed: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Refreshes the tab/title bar. Shows the file name and, when there are unsaved
+    /// changes, a small "unsaved changes" label to the right of the name.
+    /// </summary>
+    private void UpdateFileNameLabel()
+    {
+        if (_currentFilePath == null)
+        {
+            fileNameLabel.Text        = "No file open";
+            unsavedLabel.Visibility   = Visibility.Collapsed;
+            return;
+        }
+
+        fileNameLabel.Text      = Path.GetFileName(_currentFilePath);
+        unsavedLabel.Visibility = _hasUnsavedChanges
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+    }
+
     private void OnEditorKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
     {
-        // Ctrl+O to open file
-        if (e.Key == Key.O && (Keyboard.Modifiers & ModifierKeys.Control) != 0)
-        {
-            var dialog = new Microsoft.Win32.OpenFileDialog
-            {
-                Filter = "MiniGo Files (*.go;*.g;*.txt)|*.go;*.g;*.txt|All Files (*.*)|*.*"
-                };
-            if (dialog.ShowDialog() == true)
-            {
-                OpenFile(dialog.FileName);
-            }
-            e.Handled = true;
-        }
+        // No custom key handling here — all shortcuts are declared in Window.InputBindings.
+        // Previously had Ctrl+O for file open which conflicted with Ctrl+Shift+O because
+        // the TextArea receives key events before Window.InputBindings processes them.
     }
 
     #endregion
@@ -346,6 +417,15 @@ public partial class MainWindow : Window
     {
         _compileDebounceTimer.Stop();
         _compileDebounceTimer.Start();
+
+        // Mark unsaved changes only when a file is open and not already marked dirty.
+        if (_currentFilePath != null && !_hasUnsavedChanges)
+        {
+            _hasUnsavedChanges = true;
+            _dirtyFiles[_currentFilePath] = true;
+            UpdateFileNameLabel();
+            menuSave.IsEnabled = true;
+        }
     }
 
     private void TriggerCompilation()
@@ -426,13 +506,15 @@ public partial class MainWindow : Window
     #region Build and Run
 
     /// <summary>
-    /// Wires the F5/F6 RoutedCommands declared as static fields to their click handlers.
-    /// This lets the toolbar buttons and the key bindings share the same code path.
+    /// Wires all RoutedCommands declared as static fields to their handlers.
+    /// Shared by toolbar buttons, menu items, and key bindings.
     /// </summary>
     private void RegisterBuildRunCommands()
     {
-        CommandBindings.Add(new CommandBinding(BuildCommand, async (_, _) => await ExecuteBuildAsync()));
-        CommandBindings.Add(new CommandBinding(RunCommand,   async (_, _) => await ExecuteRunAsync()));
+        CommandBindings.Add(new CommandBinding(BuildCommand,      async (_, _) => await ExecuteBuildAsync()));
+        CommandBindings.Add(new CommandBinding(RunCommand,        async (_, _) => await ExecuteRunAsync()));
+        CommandBindings.Add(new CommandBinding(SaveCommand,       (_, _) => ExecuteSave()));
+        CommandBindings.Add(new CommandBinding(OpenFolderCommand, (_, _) => OnOpenFolderClick(this, new RoutedEventArgs())));
     }
 
     private async void OnBuildClick(object sender, RoutedEventArgs e) => await ExecuteBuildAsync();
@@ -459,14 +541,23 @@ public partial class MainWindow : Window
     {
         _rootFolder = null;
         _currentFilePath = null;
+        _hasUnsavedChanges = false;
+        _dirtyFiles.Clear();
+        _fileBuffers.Clear();
+
         fileTree.ItemsSource = null;
         folderPathLabel.Text = "";
+
+        textEditor.TextChanged -= OnEditorTextChanged;
         textEditor.Text = "";
+        textEditor.TextChanged += OnEditorTextChanged;
+
         fileNameLabel.Text = "No file open";
         errorList.ItemsSource = null;
         SetOutput("");
         _errorHighlighter?.ClearErrors();
 
+        menuSave.IsEnabled = false;
         welcomeOverlay.Visibility = Visibility.Visible;
         explorerOpenFolderButton.Visibility = Visibility.Visible;
         explorerCloseFolderButton.Visibility = Visibility.Hidden;
