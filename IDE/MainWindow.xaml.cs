@@ -677,13 +677,17 @@ public partial class MainWindow : Window
             SetOutput($"Compiling {Path.GetFileName(llPath)}...\n");
             UpdateStatus("Compiling…");
 
-            var compilePsi = new ProcessStartInfo(clangExe, $"\"{llPath}\" -o \"{exePath}\"")
+            var compilePsi = new ProcessStartInfo(clangExe)
             {
                 RedirectStandardOutput = true,
                 RedirectStandardError  = true,
                 UseShellExecute        = false,
                 CreateNoWindow         = true
             };
+            compilePsi.ArgumentList.Add(llPath);
+            compilePsi.ArgumentList.Add("-o");
+            compilePsi.ArgumentList.Add(exePath);
+            compilePsi.ArgumentList.Add("-Wno-override-module");
 
             using var compileProc = Process.Start(compilePsi)!;
             string compileStdout = await compileProc.StandardOutput.ReadToEndAsync();
@@ -745,40 +749,42 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Resolves the path to the clang executable.
-    /// First checks PATH via where/which, then probes common LLVM-MinGW install locations on Windows.
+    /// Resolves the absolute path to a clang executable.
+    /// Probes known install locations first, then falls back to PATH via where.exe.
     /// Returns null if clang cannot be found.
     /// </summary>
     private static string? ResolveClangPath()
     {
-        // 1. Check if "clang" resolves on the system PATH.
-        try
-        {
-            var probe = new ProcessStartInfo("clang", "--version")
-            {
-                RedirectStandardOutput = true,
-                RedirectStandardError  = true,
-                UseShellExecute        = false,
-                CreateNoWindow         = true
-            };
-            using var p = Process.Start(probe);
-            p?.WaitForExit(2000);
-            if (p?.ExitCode == 0)
-                return "clang";
-        }
-        catch { /* not on PATH */ }
-
-        // 2. Probe common LLVM-MinGW install locations.
+        // 1. Probe known absolute paths first — avoids launching a process just to check PATH.
         var candidates = new[]
         {
-            @"C:\Users\varga\AppData\Local\Microsoft\WinGet\Packages\MartinStorsjo.LLVM-MinGW.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe\llvm-mingw-20260421-ucrt-x86_64\bin\clang.exe",
             @"C:\Program Files\LLVM\bin\clang.exe",
             @"C:\LLVM\bin\clang.exe",
+            Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                @"Microsoft\WinGet\Links\clang.exe"),
         };
 
         foreach (var path in candidates)
             if (File.Exists(path))
                 return path;
+
+        // 2. Ask where.exe — safe, never throws OutOfMemoryException.
+        try
+        {
+            var psi = new ProcessStartInfo("where.exe", "clang")
+            {
+                RedirectStandardOutput = true,
+                UseShellExecute        = false,
+                CreateNoWindow         = true
+            };
+            using var p = Process.Start(psi);
+            string? line = p?.StandardOutput.ReadLine();
+            p?.WaitForExit(3000);
+            if (!string.IsNullOrWhiteSpace(line) && File.Exists(line.Trim()))
+                return line.Trim();
+        }
+        catch { /* where.exe not available */ }
 
         return null;
     }
