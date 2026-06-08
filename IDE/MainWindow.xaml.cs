@@ -564,28 +564,29 @@ public partial class MainWindow : Window
             return;
         }
 
-        SetOutput($"Running {Path.GetFileName(llPath)}...\n");
-        UpdateStatus("Running…");
-        runButton.IsEnabled = false;
-
-        string lliExe = ResolveLliPath();
-        if (lliExe == null)
+        string? clangExe = ResolveClangPath();
+        if (clangExe == null)
         {
             SetOutput(
-                "Failed to start lli: executable not found.\n\n" +
-                "Make sure LLVM is installed and 'lli' is on your PATH.\n" +
-                "Common install locations:\n" +
-                "  • winget install LLVM.LLVM  (adds C:\\Program Files\\LLVM\\bin to PATH)\n" +
-                "  • https://releases.llvm.org/download.html  (Windows installer)\n\n" +
-                "After installing, restart the IDE or add the LLVM bin folder to your system PATH.");
-            UpdateStatus("Run error — lli not found");
+                "Failed to find clang: executable not found.\n\n" +
+                "Make sure LLVM-MinGW is installed:\n" +
+                "  winget install MartinStorsjo.LLVM-MinGW\n\n" +
+                "After installing, restart the IDE or add the LLVM-MinGW bin folder to your system PATH.");
+            UpdateStatus("Run error — clang not found");
             runButton.IsEnabled = true;
             return;
         }
 
+        string tempDir = Path.Combine(Path.GetTempPath(), "MiniGoIDE");
+        Directory.CreateDirectory(tempDir);
+        string exePath = Path.Combine(tempDir, $"minigo_run_{Guid.NewGuid():N}.exe");
+
         try
         {
-            var psi = new ProcessStartInfo(lliExe, $"\"{llPath}\"")
+            SetOutput($"Compiling {Path.GetFileName(llPath)}...\n");
+            UpdateStatus("Compiling…");
+
+            var compilePsi = new ProcessStartInfo(clangExe, $"\"{llPath}\" -o \"{exePath}\"")
             {
                 RedirectStandardOutput = true,
                 RedirectStandardError  = true,
@@ -593,23 +594,50 @@ public partial class MainWindow : Window
                 CreateNoWindow         = true
             };
 
-            using var proc = Process.Start(psi)!;
-            string stdout = await proc.StandardOutput.ReadToEndAsync();
-            string stderr = await proc.StandardError.ReadToEndAsync();
-            await proc.WaitForExitAsync();
+            using var compileProc = Process.Start(compilePsi)!;
+            string compileStdout = await compileProc.StandardOutput.ReadToEndAsync();
+            string compileStderr = await compileProc.StandardError.ReadToEndAsync();
+            await compileProc.WaitForExitAsync();
 
-            string output = (stdout + (stderr.Length > 0 ? "\n[stderr]\n" + stderr : "")).TrimEnd();
+            if (compileProc.ExitCode != 0)
+            {
+                string compileOutput = (compileStdout + (compileStderr.Length > 0 ? "\n" + compileStderr : "")).TrimEnd();
+                SetOutput($"Compilation failed (exit code {compileProc.ExitCode}):\n{compileOutput}");
+                UpdateStatus("Compile error");
+                runButton.IsEnabled = true;
+                return;
+            }
+
+            SetOutput($"Running {Path.GetFileName(exePath)}...\n");
+            UpdateStatus("Running…");
+
+            var runPsi = new ProcessStartInfo(exePath)
+            {
+                RedirectStandardOutput = true,
+                RedirectStandardError  = true,
+                UseShellExecute        = false,
+                CreateNoWindow         = true,
+                WorkingDirectory       = Path.GetDirectoryName(llPath) ?? ""
+            };
+
+            using var runProc = Process.Start(runPsi)!;
+            string runStdout = await runProc.StandardOutput.ReadToEndAsync();
+            string runStderr = await runProc.StandardError.ReadToEndAsync();
+            await runProc.WaitForExitAsync();
+
+            string output = (runStdout + (runStderr.Length > 0 ? "\n[stderr]\n" + runStderr : "")).TrimEnd();
             AppendOutput(output.Length > 0 ? output : "(no output)");
-            UpdateStatus($"Exited with code {proc.ExitCode}");
+            UpdateStatus($"Exited with code {runProc.ExitCode}");
         }
         catch (Exception ex)
         {
-            SetOutput($"Failed to start lli:\n{ex.Message}\n\nMake sure LLVM is installed and 'lli' is on your PATH.");
+            SetOutput($"Failed to run:\n{ex.Message}\n\nMake sure LLVM-MinGW is installed and clang is on your PATH.");
             UpdateStatus("Run error");
         }
         finally
         {
             runButton.IsEnabled = true;
+            try { if (File.Exists(exePath)) File.Delete(exePath); } catch { }
         }
     }
 
@@ -626,16 +654,16 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Resolves the path to the lli executable.
-    /// First checks PATH via where/which, then probes common LLVM install locations on Windows.
-    /// Returns null if lli cannot be found.
+    /// Resolves the path to the clang executable.
+    /// First checks PATH via where/which, then probes common LLVM-MinGW install locations on Windows.
+    /// Returns null if clang cannot be found.
     /// </summary>
-    private static string? ResolveLliPath()
+    private static string? ResolveClangPath()
     {
-        // 1. Check if "lli" resolves on the system PATH.
+        // 1. Check if "clang" resolves on the system PATH.
         try
         {
-            var probe = new ProcessStartInfo("lli", "--version")
+            var probe = new ProcessStartInfo("clang", "--version")
             {
                 RedirectStandardOutput = true,
                 RedirectStandardError  = true,
@@ -644,16 +672,17 @@ public partial class MainWindow : Window
             };
             using var p = Process.Start(probe);
             p?.WaitForExit(2000);
-            if (p?.ExitCode == 0 || p?.ExitCode == 1) // lli --version exits 0 or 1
-                return "lli";
+            if (p?.ExitCode == 0)
+                return "clang";
         }
         catch { /* not on PATH */ }
 
-        // 2. Probe common Windows install locations.
+        // 2. Probe common LLVM-MinGW install locations.
         var candidates = new[]
         {
-            @"C:\Program Files\LLVM\bin\lli.exe",
-            @"C:\LLVM\bin\lli.exe",
+            @"C:\Users\varga\AppData\Local\Microsoft\WinGet\Packages\MartinStorsjo.LLVM-MinGW.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe\llvm-mingw-20260421-ucrt-x86_64\bin\clang.exe",
+            @"C:\Program Files\LLVM\bin\clang.exe",
+            @"C:\LLVM\bin\clang.exe",
         };
 
         foreach (var path in candidates)
