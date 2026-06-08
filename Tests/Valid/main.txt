@@ -1,4 +1,4 @@
-﻿package main;
+package main;
 
 type User struct {
     id, age int;
@@ -118,7 +118,7 @@ func testLoops() {
     println("While-style loop sum:", sum);
 
     for j := 0; j < 5; j++ {
-        println("Classic loop:", i);
+        println("Classic loop:", j);
     };
 
     for ;; {

@@ -104,7 +104,10 @@ public partial class MainWindow : Window
         {
             _rootFolder = path;
             var roots = new System.Collections.ObjectModel.ObservableCollection<FileSystemNode>();
-            roots.Add(new FileSystemNode(path, isDirectory: true));
+            var root = new FileSystemNode(path, isDirectory: true);
+            
+            root.IsExpanded = true;
+            roots.Add(root);
             fileTree.ItemsSource = roots;
             folderPathLabel.Text = Path.GetFileName(path);
             welcomeOverlay.Visibility = Visibility.Collapsed;
@@ -124,7 +127,7 @@ public partial class MainWindow : Window
         var dialog = new Microsoft.Win32.OpenFolderDialog
         {
             Title = "Select a folder to open",
-            Multiselect = false
+            Multiselect = false,
         };
         if (dialog.ShowDialog() == true)
         {
