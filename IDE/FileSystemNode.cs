@@ -40,18 +40,20 @@ public class FileSystemNode : INotifyPropertyChanged
     /// <summary>
     /// Emoji icon based on node type and state.
     /// Directories: 📁 (closed) / 📂 (expanded).
-    /// .g files: 🔹, other files: 📄.
+    /// .g / .go files: 🔹, other files: 📄.
     /// </summary>
     public string IconText => IsDirectory
         ? (IsExpanded ? "📂" : "📁")
-        : Name.EndsWith(".g", StringComparison.OrdinalIgnoreCase)
+        : IsGoFile
             ? "🔹"
             : "📄";
 
     /// <summary>
-    /// True for .g (MiniGo source) file nodes.
+    /// True for .g (MiniGo source) and .go (standard Go) file nodes.
     /// </summary>
-    public bool IsGoFile => !IsDirectory && Name.EndsWith(".g", StringComparison.OrdinalIgnoreCase);
+    public bool IsGoFile => !IsDirectory &&
+        (Name.EndsWith(".g", StringComparison.OrdinalIgnoreCase) ||
+         Name.EndsWith(".go", StringComparison.OrdinalIgnoreCase));
 
     /// <summary>
     /// Creates a node. For directory nodes, adds a placeholder child until expanded.
@@ -102,9 +104,9 @@ public class FileSystemNode : INotifyPropertyChanged
         foreach (var dir in directories.OrderBy(d => d))
             Children.Add(new FileSystemNode(dir, isDirectory: true));
 
-        // Show only .txt and .g files (MiniGo source/test files)
+        // Show .txt, .g (MiniGo) and .go (standard Go) files
         foreach (var file in files.OrderBy(f => f)
-            .Where(f => Path.GetExtension(f) is ".txt" or ".g"))
+            .Where(f => Path.GetExtension(f) is ".txt" or ".g" or ".go"))
         {
             Children.Add(new FileSystemNode(file, isDirectory: false));
         }
