@@ -860,6 +860,47 @@ public partial class MainWindow : Window
         outputPanel.ScrollToEnd();
     }
 
+    /// <summary>
+    /// Resolves the absolute path to a clang executable.
+    /// Probes known install locations first, then falls back to PATH via where.exe.
+    /// Returns null if clang cannot be found.
+    /// </summary>
+    private static string? ResolveClangPath()
+    {
+        // 1. Probe known absolute paths first — avoids launching a process just to check PATH.
+        var candidates = new[]
+        {
+            @"C:\Program Files\LLVM\bin\clang.exe",
+            @"C:\LLVM\bin\clang.exe",
+            Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                @"Microsoft\WinGet\Links\clang.exe"),
+        };
+
+        foreach (var path in candidates)
+            if (File.Exists(path))
+                return path;
+
+        // 2. Ask where.exe — safe, never throws OutOfMemoryException.
+        try
+        {
+            var psi = new ProcessStartInfo("where.exe", "clang")
+            {
+                RedirectStandardOutput = true,
+                UseShellExecute        = false,
+                CreateNoWindow         = true
+            };
+            using var p = Process.Start(psi);
+            string? line = p?.StandardOutput.ReadLine();
+            p?.WaitForExit(3000);
+            if (!string.IsNullOrWhiteSpace(line) && File.Exists(line.Trim()))
+                return line.Trim();
+        }
+        catch { /* where.exe not available */ }
+
+        return null;
+    }
+
     #endregion
 }
 

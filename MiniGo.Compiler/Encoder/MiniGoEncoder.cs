@@ -70,6 +70,15 @@ public sealed class MiniGoEncoder : MiniGoParserBaseVisitor<object>, IDisposable
 	private LLVMValueRef _currentFunction;
 
 	/// <summary>
+	/// Loop context stack for break/continue codegen.
+	/// Each entry holds the blocks a break or continue inside the loop should jump to:
+	///   exitBlock  — target of <c>break</c>    (the block after the loop)
+	///   contBlock  — target of <c>continue</c> (the post/condition block)
+	/// Pushed on entry to every loop, popped on exit.
+	/// </summary>
+	private readonly Stack<(LLVMBasicBlockRef ExitBlock, LLVMBasicBlockRef ContBlock)> _loopStack = new();
+
+	/// <summary>
 	/// Initialises the LLVM module and IR builder using the global LLVM context.
 	/// </summary>
 	/// <param name="moduleName">
@@ -706,9 +715,13 @@ public sealed class MiniGoEncoder : MiniGoParserBaseVisitor<object>, IDisposable
 
 		// ── Implicit terminator for void functions or missing return ─────────
 		// LLVM verification requires every basic block to end with a terminator.
-		// Collect all blocks via the linked list, then fix any that lack a terminator:
-		//   • last block → BuildRetVoid (implicit return for void functions)
-		//   • any earlier block → BuildUnreachable (dead merge/exit after all paths returned)
+		// After visiting the body the builder is positioned at the "natural exit"
+		// block — the one a fallthrough return would land in.  Emit ret void there
+		// if it has no terminator yet.  Every *other* unterminated block is dead
+		// control-flow (e.g. the if.merge after all branches returned early);
+		// mark those unreachable so the verifier is satisfied.
+		LLVMBasicBlockRef naturalExit = _builder.InsertBlock;
+
 		var allBlocks = new List<LLVMBasicBlockRef>();
 		var curBlock = _currentFunction.FirstBasicBlock;
 		while (curBlock.Handle != IntPtr.Zero)
@@ -716,13 +729,11 @@ public sealed class MiniGoEncoder : MiniGoParserBaseVisitor<object>, IDisposable
 			allBlocks.Add(curBlock);
 			curBlock = curBlock.Next;
 		}
-		for (int bi = 0; bi < allBlocks.Count; bi++)
+		foreach (var bb in allBlocks)
 		{
-			var bb = allBlocks[bi];
 			if (bb.Terminator != default) continue;
 			PositionAtEnd(bb);
-			bool isLast = bi == allBlocks.Count - 1;
-			if (isLast)
+			if (bb.Handle == naturalExit.Handle)
 				_builder.BuildRetVoid();
 			else
 				_builder.BuildUnreachable();
@@ -1155,6 +1166,22 @@ public sealed class MiniGoEncoder : MiniGoParserBaseVisitor<object>, IDisposable
 			return null;
 		}
 
+		// BREAK SEMICOLON — jump to the nearest enclosing loop exit block
+		if (context.BREAK() != null)
+		{
+			if (_loopStack.TryPeek(out var breakCtx))
+				_builder.BuildBr(breakCtx.ExitBlock);
+			return null;
+		}
+
+		// CONTINUE SEMICOLON — jump to the nearest enclosing loop continuation block
+		if (context.CONTINUE() != null)
+		{
+			if (_loopStack.TryPeek(out var contCtx))
+				_builder.BuildBr(contCtx.ContBlock);
+			return null;
+		}
+
 		// ifStatement / loop / switch → commits 6, 7
 		// simpleStatement, block, variableDecl, typeDecl → VisitChildren dispatches correctly
 		return base.VisitStatement(context);
@@ -1368,11 +1395,19 @@ public sealed class MiniGoEncoder : MiniGoParserBaseVisitor<object>, IDisposable
 		}
 
 		// ── Body ──────────────────────────────────────────────────────────────
+		// Push loop context so break/continue inside the body know where to jump.
+		// continue → back to condition check (or body start for infinite loops)
+		// break    → straight to exit block
+		LLVMBasicBlockRef contBlock = hasCond ? condBlock : bodyBlock;
+		_loopStack.Push((exitBlock, contBlock));
+
 		PositionAtEnd(bodyBlock);
 		Visit(context.block());
 
+		_loopStack.Pop();
+
 		// Post statement runs at the end of each iteration (e.g. i++)
-		// Skip if the body already terminated (e.g. a return inside the loop).
+		// Skip if the body already terminated (e.g. a return/break/continue).
 		if (hasPost && _builder.InsertBlock.Terminator == default)
 			Visit(stmts[1]);
 
@@ -1382,32 +1417,93 @@ public sealed class MiniGoEncoder : MiniGoParserBaseVisitor<object>, IDisposable
 
 		// ── Exit — execution continues here after the loop ────────────────────
 		PositionAtEnd(exitBlock);
-		// For infinite loops (no condition, no break implemented), loop.exit is never jumped to.
-		// Emit unreachable so LLVM verification passes.
-		if (!hasCond && exitBlock.Terminator == default)
-			_builder.BuildUnreachable();
 
 		return null;
 	}
 
 	public override object VisitSwitch(MiniGoParser.SwitchContext context)
 	{
-		return base.VisitSwitch(context);
+		// Optional init statement:  SWITCH simpleStatement ; expression { ... }
+		if (context.simpleStatement() != null)
+			Visit(context.simpleStatement());
+
+		// Subject expression (may be absent for a tagless switch — treat as true i.e. 1).
+		LLVMValueRef subject = context.expression() != null
+			? VisitExpr(context.expression())
+			: LLVMValueRef.CreateConstInt(IntType, 1, false);
+
+		// Collect all clauses.
+		var clauses = new List<MiniGoParser.ExpressionCaseClauseContext>();
+		var clauseList = context.expressionCaseClauseList();
+		while (clauseList != null && clauseList.expressionCaseClause() != null)
+		{
+			clauses.Add(clauseList.expressionCaseClause());
+			clauseList = clauseList.expressionCaseClauseList();
+		}
+
+		// Create one basic block per clause plus an exit block.
+		LLVMBasicBlockRef exitBlock    = _currentFunction.AppendBasicBlock("switch.exit");
+		LLVMBasicBlockRef defaultBlock = exitBlock; // default falls through to exit unless overridden
+
+		var caseBlocks = new List<LLVMBasicBlockRef>();
+		foreach (var clause in clauses)
+		{
+			var bb = _currentFunction.AppendBasicBlock("switch.case");
+			caseBlocks.Add(bb);
+			if (clause.expressionSwitchCase().DEFAULT() != null)
+				defaultBlock = bb;
+		}
+
+		// Emit the LLVM switch instruction.
+		// BuildSwitch(value, defaultBlock, numCases) creates the dispatch.
+		var sw = _builder.BuildSwitch(subject, defaultBlock, (uint)clauses.Count);
+
+		// Add each CASE value → block mapping.
+		for (int ci = 0; ci < clauses.Count; ci++)
+		{
+			var switchCase = clauses[ci].expressionSwitchCase();
+			if (switchCase.DEFAULT() != null) continue; // default already set above
+
+			var exprs = switchCase.expressionList().expression();
+			foreach (var expr in exprs)
+			{
+				LLVMValueRef caseVal = VisitExpr(expr);
+				sw.AddCase(caseVal, caseBlocks[ci]);
+			}
+		}
+
+		// Emit each clause body; push loop-like exit so break works inside switch.
+		_loopStack.Push((exitBlock, exitBlock));
+		for (int ci = 0; ci < clauses.Count; ci++)
+		{
+			PositionAtEnd(caseBlocks[ci]);
+			Visit(clauses[ci].statementList());
+			// No fallthrough in MiniGo — jump to exit if the body didn't already terminate.
+			if (_builder.InsertBlock.Terminator == default)
+				_builder.BuildBr(exitBlock);
+		}
+		_loopStack.Pop();
+
+		PositionAtEnd(exitBlock);
+		return null;
 	}
 
 	public override object VisitExpressionCaseClauseList(MiniGoParser.ExpressionCaseClauseListContext context)
 	{
-		return base.VisitExpressionCaseClauseList(context);
+		// Handled directly inside VisitSwitch; base visitor not needed.
+		return null;
 	}
 
 	public override object VisitExpressionCaseClause(MiniGoParser.ExpressionCaseClauseContext context)
 	{
-		return base.VisitExpressionCaseClause(context);
+		// Handled directly inside VisitSwitch; base visitor not needed.
+		return null;
 	}
 
 	public override object VisitExpressionSwitchCase(MiniGoParser.ExpressionSwitchCaseContext context)
 	{
-		return base.VisitExpressionSwitchCase(context);
+		// Handled directly inside VisitSwitch; base visitor not needed.
+		return null;
 	}
 
 	public override object Visit(IParseTree tree)
