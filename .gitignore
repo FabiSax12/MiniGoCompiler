@@ -50,3 +50,6 @@ out/
 
 # Ignorar archivos generados de LLVM IR (generados localmente)
 *.ll
+*.obj
+*.exe
+nul
