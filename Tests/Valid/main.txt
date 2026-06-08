@@ -1,4 +1,4 @@
-package main;
+﻿package main;
 
 type User struct {
     id, age int;

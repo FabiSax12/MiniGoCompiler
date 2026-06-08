@@ -42,6 +42,21 @@ public sealed class MiniGoEncoder : MiniGoParserBaseVisitor<object>, IDisposable
 	/// </summary>
 	private readonly Dictionary<string, LLVMTypeRef> _typeAliases = new();
 
+	/// <summary>Maps struct name → LLVM struct type with all fields resolved.</summary>
+	private readonly Dictionary<string, LLVMTypeRef> _structTypes = new();
+
+	/// <summary>Maps struct name → (fieldName → (LLVM field type, field index)).</summary>
+	private readonly Dictionary<string, Dictionary<string, (LLVMTypeRef Type, uint Index)>> _structFields = new();
+
+	/// <summary>Reverse lookup: LLVM struct type → struct name for field resolution.</summary>
+	private readonly Dictionary<LLVMTypeRef, string> _structTypeToName = new();
+
+	/// <summary>Name of the struct currently being built (non-null inside VisitSingleTypeDecl for structs).</summary>
+	private string? _pendingStructName;
+
+	/// <summary>Fields collected while visiting structMemDecls during struct construction.</summary>
+	private readonly List<(string Name, LLVMTypeRef Type)> _pendingStructFields = new();
+
 	/// <summary>
 	/// LLVM function types keyed by name. <c>BuildCall2</c> requires the callee's
 	/// <see cref="LLVMTypeRef"/> separately from the <see cref="LLVMValueRef"/>.
@@ -132,15 +147,41 @@ public sealed class MiniGoEncoder : MiniGoParserBaseVisitor<object>, IDisposable
 			uint n = uint.Parse(ctx.arrayDeclType().INTLITERAL().GetText());
 			return IntArrayType(n);
 		}
-		// Struct type: not fully supported in codegen — use i32 as opaque placeholder.
+		// Inline struct type (anonymous): build LLVM struct type from field declarations.
 		if (ctx.structDeclType() != null)
-			return IntType;
-		// Identifier type: check type alias registry before falling back to builtins.
-		if (ctx.IDENTIFIER() != null && _typeAliases.TryGetValue(ctx.IDENTIFIER().GetText(), out var aliasType))
-			return aliasType;
+			return BuildAnonymousStructType(ctx.structDeclType());
+		// Named type: check struct registry first, then type alias registry, then builtins.
+		if (ctx.IDENTIFIER() != null)
+		{
+			string name = ctx.IDENTIFIER().GetText();
+			if (_structTypes.TryGetValue(name, out var structType))
+				return structType;
+			if (_typeAliases.TryGetValue(name, out var aliasType))
+				return aliasType;
+		}
 		var resolved = LlvmType(TypeResolver.Resolve(ctx));
-		// Unknown type (e.g. user-defined struct used by name) — safe fallback.
+		// Unknown type (e.g. user-defined struct used by name before definition) — safe fallback.
 		return resolved == LLVMTypeRef.Void ? IntType : resolved;
+	}
+
+	/// <summary>
+	/// Builds an anonymous LLVM struct type from an inline <c>structDeclType</c>.
+	/// Used for nested/anonymous structs and as the intermediate step during named struct construction.
+	/// </summary>
+	private LLVMTypeRef BuildAnonymousStructType(MiniGoParser.StructDeclTypeContext ctx)
+	{
+		var memDecls = ctx.structMemDecls();
+		if (memDecls == null)
+			return LLVMTypeRef.CreateStruct(Array.Empty<LLVMTypeRef>(), false);
+
+		var fieldTypes = new List<LLVMTypeRef>();
+		foreach (var member in memDecls.singleVarDeclNoExps())
+		{
+			LLVMTypeRef memberType = LlvmTypeFromDecl(member.declType());
+			foreach (var _ in member.identifierList().IDENTIFIER())
+				fieldTypes.Add(memberType);
+		}
+		return LLVMTypeRef.CreateStruct(fieldTypes.ToArray(), false);
 	}
 
 	#endregion
@@ -266,12 +307,43 @@ public sealed class MiniGoEncoder : MiniGoParserBaseVisitor<object>, IDisposable
 			return _builder.BuildGEP2(arrType, arrPtr, new[] { zero, idx }, "elem_ptr");
 		}
 
-		// Struct field selector: u.id  — full struct codegen not supported; return null ptr
-		// so the caller's BuildStore is skipped (the assignment becomes a no-op).
+		// Struct field selector: u.id  →  GEP to field pointer
 		if (primary.selector() != null)
-			return default;
+		{
+			string fieldName = primary.selector().IDENTIFIER().GetText();
+			return GetStructFieldPtr(primary.primaryExpression(), fieldName);
+		}
 
 		return default;
+	}
+
+	/// <summary>
+	/// Resolves a GEP pointer to a struct field given the base expression and field name.
+	/// For a base like <c>u</c> and field <c>name</c>, emits a GEP2 that indexes into the
+	/// correct element of the LLVM struct type stored in the alloca.
+	/// Returns <c>default</c> if the base is not a struct variable, the field is unknown,
+	/// or the builder has no active insertion point.
+	/// </summary>
+	private LLVMValueRef GetStructFieldPtr(MiniGoParser.PrimaryExpressionContext basePrimary, string fieldName)
+	{
+		// Base must be a simple identifier (e.g. "u"); chained selectors not yet supported.
+		string? baseName = basePrimary?.operand()?.IDENTIFIER()?.GetText();
+		if (baseName == null) return default;
+
+		var (basePtr, baseElemType) = ResolveLocal(baseName);
+		if (basePtr == default || baseElemType.Kind != LLVMTypeKind.LLVMStructTypeKind)
+			return default;
+
+		if (!_structTypeToName.TryGetValue(baseElemType, out var structName))
+			return default;
+
+		if (!_structFields.TryGetValue(structName, out var fields) ||
+		    !fields.TryGetValue(fieldName, out var fieldInfo))
+			return default;
+
+		LLVMValueRef zero     = LLVMValueRef.CreateConstInt(IntType, 0, false);
+		LLVMValueRef fieldIdx = LLVMValueRef.CreateConstInt(IntType, fieldInfo.Index, false);
+		return _builder.BuildGEP2(baseElemType, basePtr, new[] { zero, fieldIdx }, $"{baseName}_{fieldName}_ptr");
 	}
 
 	/// <summary>Returns <see langword="true"/> when the builder is not inside any function body.</summary>
@@ -540,10 +612,35 @@ public sealed class MiniGoEncoder : MiniGoParserBaseVisitor<object>, IDisposable
 
 	public override object VisitSingleTypeDecl(MiniGoParser.SingleTypeDeclContext context)
 	{
-		// Register type aliases so that variable declarations using them resolve correctly.
-		// e.g.  type Counter int  →  "Counter" → i32
-		// Struct types are registered as i32 (opaque placeholder — full codegen not supported).
 		string aliasName = context.IDENTIFIER().GetText();
+
+		// ── Struct definition: type Name struct { ... } ───────────────────────
+		// Build the LLVM struct type from its field declarations, register it so
+		// subsequent variable declarations (var x Name) can resolve the type.
+		var structDecl = context.declType()?.structDeclType();
+		if (structDecl != null)
+		{
+			_pendingStructName = aliasName;
+			_pendingStructFields.Clear();
+			base.VisitSingleTypeDecl(context); // descends into structMemDecls, populates _pendingStructFields
+
+			var fieldTypes = _pendingStructFields.Select(f => f.Type).ToArray();
+			var llvmStructType = LLVMTypeRef.CreateStruct(fieldTypes, false);
+			_structTypes[aliasName] = llvmStructType;
+			_structTypeToName[llvmStructType] = aliasName;
+			_typeAliases[aliasName] = llvmStructType;
+
+			var fields = new Dictionary<string, (LLVMTypeRef Type, uint Index)>();
+			for (int i = 0; i < _pendingStructFields.Count; i++)
+				fields[_pendingStructFields[i].Name] = (_pendingStructFields[i].Type, (uint)i);
+			_structFields[aliasName] = fields;
+
+			_pendingStructName = null;
+			_pendingStructFields.Clear();
+			return null;
+		}
+
+		// ── Non-struct type alias: type Celsius float ─────────────────────────
 		if (!_typeAliases.ContainsKey(aliasName))
 		{
 			LLVMTypeRef underlying = context.declType() != null
@@ -672,7 +769,17 @@ public sealed class MiniGoEncoder : MiniGoParserBaseVisitor<object>, IDisposable
 
 	public override object VisitStructMemDecls(MiniGoParser.StructMemDeclsContext context)
 	{
-		return base.VisitStructMemDecls(context);
+		// Collect field names and LLVM types while inside a struct definition.
+		// _pendingStructName is set by VisitSingleTypeDecl before descending.
+		if (_pendingStructName == null) return null;
+
+		foreach (var member in context.singleVarDeclNoExps())
+		{
+			LLVMTypeRef memberType = LlvmTypeFromDecl(member.declType());
+			foreach (var id in member.identifierList().IDENTIFIER())
+				_pendingStructFields.Add((id.GetText(), memberType));
+		}
+		return null;
 	}
 
 	public override object VisitIdentifierList(MiniGoParser.IdentifierListContext context)
@@ -798,8 +905,87 @@ public sealed class MiniGoEncoder : MiniGoParserBaseVisitor<object>, IDisposable
 			return _builder.BuildLoad2(IntType, elemPtr, "elem");
 		}
 
-		// selector, appendExpression, lengthExpression, capExpression
-		// lengthExpression and capExpression dispatch through VisitChildren → their own Visit* methods.
+		// Struct field read: u.name  or  u.address.street
+		if (context.selector() != null)
+		{
+			string fieldName = context.selector().IDENTIFIER().GetText();
+			var basePrimary = context.primaryExpression();
+
+			// If the base is itself a selector chain (e.g. u.address in u.address.street),
+			// recurse to get the base pointer and type, then GEP from there.
+			// For the flat case (u.name), the base is a simple operand.
+			if (basePrimary?.selector() != null)
+			{
+				// Chained selector: load the base struct value, then extract field from it.
+				// MiniGo structs are always behind alloca pointers, so we can GEP from the alloca.
+				// Walk to the leaf operand to find the root variable name.
+				var cursor = basePrimary;
+				while (cursor?.selector() != null)
+					cursor = cursor.primaryExpression();
+				string? rootName = cursor?.operand()?.IDENTIFIER()?.GetText();
+				if (rootName == null)
+					return LLVMValueRef.CreateConstNull(IntType);
+
+				// Build GEP path: all field indices from root to the penultimate field
+				var gepCursor = context.primaryExpression();
+				var fieldPath = new List<string>();
+				fieldPath.Add(fieldName); // deepest field
+				while (gepCursor?.selector() != null)
+				{
+					fieldPath.Add(gepCursor.selector().IDENTIFIER().GetText());
+					gepCursor = gepCursor.primaryExpression();
+				}
+				fieldPath.Reverse(); // root-relative order
+
+				var (rootPtr, rootElemType) = ResolveLocal(rootName);
+				if (rootPtr == default || rootElemType.Kind != LLVMTypeKind.LLVMStructTypeKind)
+					return LLVMValueRef.CreateConstNull(IntType);
+
+				LLVMValueRef currentPtr = rootPtr;
+				LLVMTypeRef currentType = rootElemType;
+				for (int i = 0; i < fieldPath.Count; i++)
+				{
+					string fname = fieldPath[i];
+					if (!_structTypeToName.TryGetValue(currentType, out var sname))
+						return LLVMValueRef.CreateConstNull(IntType);
+					if (!_structFields.TryGetValue(sname, out var sfields) || !sfields.TryGetValue(fname, out var finfo))
+						return LLVMValueRef.CreateConstNull(IntType);
+
+					LLVMValueRef zero = LLVMValueRef.CreateConstInt(IntType, 0, false);
+					LLVMValueRef fidx = LLVMValueRef.CreateConstInt(IntType, finfo.Index, false);
+					bool isLast = i == fieldPath.Count - 1;
+					string gepName = isLast ? $"{rootName}_{fname}" : $"{rootName}_{fname}_ptr";
+					currentPtr = _builder.BuildGEP2(currentType, currentPtr, new[] { zero, fidx }, gepName);
+					if (isLast)
+						return _builder.BuildLoad2(finfo.Type, currentPtr, $"{rootName}_{fname}");
+					// For intermediate fields that are themselves structs, load to get the struct value,
+					// then next GEP indexes into it. But wait — GEP on a loaded struct value doesn't work.
+					// Instead, the pointer from the previous GEP already points to the nested struct
+					// within the alloca, so we can GEP further into it directly.
+					currentType = finfo.Type;
+				}
+				return LLVMValueRef.CreateConstNull(IntType); // unreachable
+			}
+
+			// Flat selector: u.name  (base is a simple identifier operand)
+			LLVMValueRef fieldPtr = GetStructFieldPtr(basePrimary, fieldName);
+			if (fieldPtr == default)
+				return LLVMValueRef.CreateConstNull(IntType);
+
+			// Resolve the field type from the struct registry
+			string? baseName = basePrimary?.operand()?.IDENTIFIER()?.GetText();
+			if (baseName == null) return LLVMValueRef.CreateConstNull(IntType);
+			var (_, baseType) = ResolveLocal(baseName);
+			if (!_structTypeToName.TryGetValue(baseType, out var structName))
+				return LLVMValueRef.CreateConstNull(IntType);
+			if (!_structFields.TryGetValue(structName, out var fields) || !fields.TryGetValue(fieldName, out var fInfo))
+				return LLVMValueRef.CreateConstNull(IntType);
+
+			return _builder.BuildLoad2(fInfo.Type, fieldPtr, $"{baseName}_{fieldName}");
+		}
+
+		// appendExpression, lengthExpression, capExpression
+		// These dispatch through VisitChildren → their own Visit* methods.
 		return base.VisitPrimaryExpression(context);
 	}
 
