@@ -1,0 +1,290 @@
+/*
+ * ============================================================================
+ * E2E Test: Declarations & Types
+ * ============================================================================
+ *
+ * Output Esperado:
+ *   Compilacion exitosa. Sin errores sintacticos ni semanticos.
+ *   Salida: imprime los valores de todas las variables declaradas.
+ *
+ * Cobertura de Tokens:
+ *   PACKAGE, VAR, TYPE, STRUCT, IDENTIFIER, INTLITERAL, FLOATLITERAL,
+ *   RUNELITERAL, RAWSTRINGLITERAL, INTERPRETEDSTRINGLITERAL,
+ *   ASSIGN, DECLARE_ASSIGN, LPAREN, RPAREN, LBRACE, RBRACE,
+ *   LBRACKET, RBRACKET, COMMA, DOT, COLON, SEMICOLON
+ *
+ * Cobertura de Rules:
+ *   root, topDeclarationList
+ *   variableDecl (3 formas: simple, bloque con vars, bloque vacio)
+ *   innerVarDecls
+ *   singleVarDecl (3 formas: con tipo+expresion, inferencia, sin expresion)
+ *   singleVarDeclNoExps
+ *   typeDecl (3 formas: simple, bloque con tipos, bloque vacio)
+ *   innerTypeDecls
+ *   singleTypeDecl
+ *   declType (5 formas: parentesis, identifier, slice, array, struct)
+ *   sliceDeclType, arrayDeclType, structDeclType, structMemDecls
+ *   identifierList (simple y multiple)
+ * ============================================================================
+ */
+
+package main;
+
+// ============================================================
+// typeDecl: forma simple (singleTypeDecl)
+// ============================================================
+type Celsius float64;
+type Counter int;
+type Flag bool;
+type Name string;
+type RuneAlias rune;
+
+// ============================================================
+// typeDecl: forma con bloque (innerTypeDecls)
+// ============================================================
+type (
+    BiggestInt int;
+    SmallestFloat float64;
+);
+
+// ============================================================
+// typeDecl: bloque vacio
+// ============================================================
+type ( );
+
+// ============================================================
+// typeDecl + structDeclType: struct simple
+// ============================================================
+type Point struct {
+    x int;
+    y int;
+};
+
+// ============================================================
+// typeDecl + structDeclType: structs en bloque
+// ============================================================
+type (
+    Person struct {
+        name string;
+        age int;
+        active bool;
+    };
+
+    Rectangle struct {
+        width float64;
+        height float64;
+    };
+);
+
+// ============================================================
+// structDeclType: struct vacio
+// ============================================================
+type Empty struct { };
+
+// ============================================================
+// arrayDeclType: arreglo de enteros
+// ============================================================
+type IntArray [10]int;
+
+// ============================================================
+// sliceDeclType: slice de enteros
+// ============================================================
+type IntSlice []int;
+
+// ============================================================
+// declType: parentesis
+// ============================================================
+type WrappedInt (int);
+
+// ============================================================
+// variableDecl: forma simple (con tipo + expresion)
+// ============================================================
+var globalInt int = 42;
+var globalFloat float64 = 3.14;
+var globalBool bool = true;
+var globalStr string = "hello";
+var globalRune rune = 'A';
+
+// ============================================================
+// variableDecl: forma con bloque (innerVarDecls)
+//   - singleVarDecl con tipo + expresion
+//   - singleVarDeclNoExps (solo tipo, sin expresion)
+//   - identifierList multiple
+// ============================================================
+var (
+    a, b int = 10, 20;
+    c float64 = 1.5;
+    d string = "block var";
+
+    counter int;
+    total int;
+    enabled bool;
+);
+
+// ============================================================
+// variableDecl: bloque vacio
+// ============================================================
+var ( );
+
+func main() {
+    // ============================================================
+    // variableDecl local: con tipo + expresion
+    // ============================================================
+    var localInt int = 100;
+    var localFloat float64 = 2.718;
+
+    // ============================================================
+    // singleVarDecl: inferencia de tipo (sin declType, con ASSIGN)
+    // ============================================================
+    var inferredInt = 999;
+    var inferredFloat = 9.81;
+    var inferredBool = false;
+    var inferredStr = "inferred string";
+    var inferredRune = 'Z';
+
+    // ============================================================
+    // singleVarDeclNoExps: solo tipo, sin expresion
+    // ============================================================
+    var onlyDeclared float64;
+    var onlyDeclaredStr string;
+
+    // ============================================================
+    // declType entre parentesis: (int)
+    // ============================================================
+    var parenInt (int) = 555;
+
+    // ============================================================
+    // DECLARE_ASSIGN (:=) inferencia
+    // ============================================================
+    shortDeclInt := 42;
+    shortDeclFloat := 3.1415;
+
+    // ============================================================
+    // identifierList: multiples identificadores con tipo
+    // ============================================================
+    var x, y, z int = 1, 2, 3;
+
+    // ============================================================
+    // identifierList: inferencia multiple
+    // ============================================================
+    var m, n = 100, 200;
+
+    // ============================================================
+    // arrayDeclType local: arreglo
+    // ============================================================
+    var arr [5]int;
+
+    // ============================================================
+    // sliceDeclType local: slice
+    // ============================================================
+    var slice []int;
+
+    // ============================================================
+    // RAWSTRINGLITERAL
+    // ============================================================
+    var raw string = `This is
+a raw string
+with "quotes" and 'apostrophes'
+spanning multiple lines`;
+
+    // ============================================================
+    // INTERPRETEDSTRINGLITERAL
+    // ============================================================
+    var interpreted string = "Hello, MiniGo!";
+
+    // ============================================================
+    // RUNELITERAL (con y sin escape)
+    // ============================================================
+    var r rune = 'a';
+    var tab rune = '\t';
+    var newline rune = '\n';
+
+    // ============================================================
+    // FLOATLITERAL
+    // ============================================================
+    var pi float64 = 3.141592653589793;
+    var smallFloat float64 = 0.001;
+
+    // ============================================================
+    // struct usage
+    // ============================================================
+    var p Point;
+    p.x = 10;
+    p.y = 20;
+
+    var pers Person;
+    pers.name = "Alice";
+    pers.age = 30;
+    pers.active = true;
+
+    // ============================================================
+    // Imprimir todos los valores
+    // ============================================================
+    println("=== Globales ===");
+    println(globalInt);
+    println(globalFloat);
+    println(globalBool);
+    println(globalStr);
+
+    println("=== Locales ===");
+    println(localInt);
+    println(localFloat);
+    println(inferredInt);
+    println(inferredFloat);
+    println(inferredBool);
+    println(inferredStr);
+    println(parenInt);
+
+    println("=== Short Decl ===");
+    println(shortDeclInt);
+    println(shortDeclFloat);
+
+    println("=== Multi ID ===");
+    println(x);
+    println(y);
+    println(z);
+    println(m);
+    println(n);
+
+    println("=== Strings ===");
+    println(raw);
+    println(interpreted);
+
+    println("=== Runes ===");
+    println(r);
+    println(tab);
+    println(newline);
+    println(inferredRune);
+
+    println("=== Floats ===");
+    println(pi);
+    println(smallFloat);
+
+    println("=== Sin Expr ===");
+    onlyDeclared = 3.14;
+    println(onlyDeclared);
+    onlyDeclaredStr = "now set";
+    println(onlyDeclaredStr);
+
+    println("=== Array/Slice ===");
+    arr[0] = 10;
+    println(arr[0]);
+    var sliceLen int = len(slice);
+    println(sliceLen);
+
+    println("=== Struct ===");
+    println(p.x);
+    println(p.y);
+    println(pers.name);
+    println(pers.age);
+    println(pers.active);
+};
+
+// ============================================================
+// Comentario de linea
+// ============================================================
+
+/*
+   Comentario de bloque
+   multilinea
+*/

@@ -1,0 +1,220 @@
+/*
+ * ============================================================================
+ * E2E Test: Functions & Builtins
+ * ============================================================================
+ *
+ * Output Esperado:
+ *   Compilacion exitosa. Sin errores sintacticos ni semanticos.
+ *   Salida: imprime resultados de llamadas a funciones, len,
+ *           print, println, acceso a structs y arreglos.
+ *
+ * Cobertura de Tokens:
+ *   FUNC, RETURN, LEN, PRINT, PRINTLN
+ *   (APPEND y CAP se omiten por limitacion del encoder)
+ *
+ * Cobertura de Rules:
+ *   funcDecl, funcFrontDecl (con/sin parametros, con/sin tipo de retorno)
+ *   funcArgDecls (0, 1, N parametros)
+ *   arguments: ( expressionList | epsilon )
+ *   lengthExpression: LEN ( expr )
+ *   capExpression: CAP ( expr ) — parseado pero no soportado por encoder
+ *   appendExpression: APPEND ( expr , expr ) — parseado pero no soportado
+ *   statement: PRINT, PRINTLN (con/sin expressionList)
+ *   primaryExpression: selector (struct), index (array), arguments (call)
+ *   identifierList + coma en argumentos de llamada
+ * ============================================================================
+ */
+
+package main;
+
+type Item struct {
+    id int;
+    name string;
+};
+
+// ============================================================
+// funcFrontDecl: sin parametros, sin tipo de retorno (void)
+// ============================================================
+func sayHello() {
+    println("Hello from MiniGo!");
+};
+
+// ============================================================
+// funcFrontDecl: con parametros, con tipo de retorno
+// ============================================================
+func add(a int, b int) int {
+    return a + b;
+};
+
+// ============================================================
+// funcFrontDecl: multiples parametros de distinto tipo, con retorno
+// ============================================================
+func combine(a int, b float64, c string) string {
+    println(a);
+    println(b);
+    return c;
+};
+
+// ============================================================
+// funcFrontDecl: un solo parametro, sin retorno
+// ============================================================
+func printTwice(msg string) {
+    println(msg);
+    println(msg);
+};
+
+// ============================================================
+// RETURN: con y sin expresion
+// ============================================================
+func absolute(n int) int {
+    if n < 0 {
+        return -n;
+    };
+    return n;
+};
+
+func earlyReturn(x int) {
+    if x < 0 {
+        println("negative, returning early");
+        return;
+    };
+    println("non-negative:", x);
+};
+
+// ============================================================
+// primaryExpression: arguments — llamadas con y sin argumentos
+// ============================================================
+func noArgs() int {
+    return 42;
+};
+
+func oneArg(x int) int {
+    return x * 2;
+};
+
+func threeArgs(a int, b int, c int) int {
+    return a + b + c;
+};
+
+// ============================================================
+// primaryExpression: selector — acceso a campos de struct
+// ============================================================
+func testSelector() {
+    println("=== Selector Struct ===");
+    var it Item;
+    it.id = 1;
+    it.name = "widget";
+    println(it.id);
+    println(it.name);
+};
+
+// ============================================================
+// primaryExpression: index — acceso a elementos de arreglo
+// ============================================================
+func testIndex() {
+    println("=== Index Array ===");
+    var nums [5]int;
+    nums[0] = 10;
+    nums[1] = 20;
+    nums[2] = 30;
+    nums[3] = nums[0] + nums[1];
+    var idx int = 2;
+    println(nums[0]);
+    println(nums[1]);
+    println(nums[idx]);
+    println(nums[3]);
+};
+
+// ============================================================
+// lengthExpression: LEN ( expr )
+// ============================================================
+func testLen() {
+    println("=== Len ===");
+    var arr [5]int;
+    var length int = len(arr);
+    println(length);
+};
+
+// ============================================================
+// PRINT: con y sin expressionList (epsilon)
+// ============================================================
+func testPrintBuiltin() {
+    println("=== Print ===");
+    print("A");
+    print("B");
+    print();
+    print(42);
+    print(3.14);
+};
+
+// ============================================================
+// PRINTLN: con y sin expressionList (epsilon)
+// ============================================================
+func testPrintlnBuiltin() {
+    println("=== Println ===");
+    println();
+    println("single arg");
+    println("multi", "args", 1, 2, 3.0);
+    println(`raw string in println`);
+    println('r');
+};
+
+// ============================================================
+// Combinacion: struct + selector + argumentos (sin pasar struct por valor)
+// ============================================================
+func testStructOps() {
+    println("=== Struct Ops ===");
+    var it Item;
+    it.id = 99;
+    it.name = "gadget";
+    println("Item:", it.id, it.name);
+
+    it.id = 55;
+    println("modified:", it.id, it.name);
+};
+
+// ============================================================
+// Funcion con multiple comma en argumentos (expressionList)
+// ============================================================
+func sumAll(a int, b int, c int, d int) int {
+    return a + b + c + d;
+};
+
+// ============================================================
+// MAIN
+// ============================================================
+func main() {
+    sayHello();
+
+    var sum int = add(10, 20);
+    println("add:", sum);
+
+    var result string = combine(1, 2.5, "done");
+    println("combine:", result);
+
+    printTwice("echo");
+
+    println("abs(-5):", absolute(-5));
+    println("abs(3):", absolute(3));
+
+    earlyReturn(-1);
+    earlyReturn(100);
+
+    println("noArgs:", noArgs());
+    println("oneArg:", oneArg(7));
+    println("threeArgs:", threeArgs(1, 2, 3));
+
+    println("sumAll:", sumAll(1, 2, 3, 4));
+
+    testSelector();
+    testIndex();
+    testLen();
+    testPrintBuiltin();
+    testPrintlnBuiltin();
+
+    testStructOps();
+
+    println("sumAll:", sumAll(1, 2, 3, 4));
+
+    println("=== Functions & Builtins Complete ===");
+};

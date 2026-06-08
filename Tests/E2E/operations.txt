@@ -1,0 +1,226 @@
+/*
+ * ============================================================================
+ * E2E Test: Operations & Expressions
+ * ============================================================================
+ *
+ * Output Esperado:
+ *   Compilacion exitosa. Sin errores sintacticos ni semanticos.
+ *   Salida: imprime los resultados de todas las operaciones.
+ *
+ * Cobertura de Tokens:
+ *   Operadores binarios: PLUS, MINUS, STAR, DIV, MOD, AMP, PIPE, CARET,
+ *     LSHIFT, RSHIFT, BIT_CLEAR, LOGICAL_AND, LOGICAL_OR
+ *   Operadores unarios: PLUS, MINUS, NOT, CARET
+ *   Comparaciones: EQUALS, NOT_EQUALS, LESS, LESS_EQUALS, GREATER,
+ *     GREATER_EQUALS
+ *   Asignaciones: ASSIGN, DECLARE_ASSIGN, PLUS_ASSIGN, MINUS_ASSIGN,
+ *     STAR_ASSIGN, DIV_ASSIGN, MOD_ASSIGN, AMP_ASSIGN, PIPE_ASSIGN,
+ *     CARET_ASSIGN, LSHIFT_ASSIGN, RSHIFT_ASSIGN, BIT_CLEAR_ASSIGN
+ *   Incremento/Decremento: INCREMENT, DECREMENT
+ *   Literales: INTLITERAL, FLOATLITERAL, RUNELITERAL, RAWSTRINGLITERAL,
+ *     INTERPRETEDSTRINGLITERAL
+ *
+ * Cobertura de Rules:
+ *   expression (todos los binarios, todos los unarios)
+ *   expressionList
+ *   primaryExpression: operand (literal, IDENTIFIER, parentesis), index,
+ *     selector, arguments
+ *   operand: literal, IDENTIFIER, ( expression )
+ *   literal: INTLITERAL, FLOATLITERAL, RUNELITERAL, RAWSTRINGLITERAL,
+ *     INTERPRETEDSTRINGLITERAL
+ *   index: [ expression ]
+ *   selector: . IDENTIFIER
+ *   arguments: ( expressionList | epsilon )
+ *   simpleStatement: expression, expression++, expression--,
+ *     assignmentStatement, expressionList := expressionList
+ *   assignmentStatement (las 12 formas)
+ * ============================================================================
+ */
+
+package main;
+
+func main() {
+    var a int = 10;
+    var b int = 3;
+    var f1 float64 = 5.5;
+    var f2 float64 = 2.0;
+
+    // ============================================================
+    // expression: aritmeticos binarios
+    //   STAR, DIV, MOD, PLUS, MINUS
+    // ============================================================
+    println("=== Aritmeticos ===");
+    println(a + b);
+    println(a - b);
+    println(a * b);
+    println(a / b);
+    println(a % b);
+
+    println(f1 + f2);
+    println(f1 - f2);
+    println(f1 * f2);
+    println(f1 / f2);
+
+    // ============================================================
+    // expression: bitwise binarios
+    //   AMP, PIPE, CARET, LSHIFT, RSHIFT, BIT_CLEAR
+    // ============================================================
+    println("=== Bitwise ===");
+    println(a & b);
+    println(a | b);
+    println(a ^ b);
+    println(a << 1);
+    println(a >> 1);
+    println(a &^ b);
+
+    // ============================================================
+    // expression: comparaciones
+    //   EQUALS, NOT_EQUALS, LESS, LESS_EQUALS, GREATER, GREATER_EQUALS
+    // ============================================================
+    println("=== Comparaciones ===");
+    println(a == b);
+    println(a != b);
+    println(a < b);
+    println(a <= b);
+    println(a > b);
+    println(a >= b);
+
+    // ============================================================
+    // expression: logicos
+    //   LOGICAL_AND, LOGICAL_OR, NOT
+    // ============================================================
+    println("=== Logicos ===");
+    println(a > 5 && b < 5);
+    println(a < 5 || b < 5);
+    var notResult bool = !true;
+    println(notResult);
+
+    // ============================================================
+    // expression: operadores unarios
+    //   PLUS, MINUS, CARET (unarios)
+    // ============================================================
+    println("=== Unarios ===");
+    println(+a);
+    println(-a);
+    println(^a);
+
+    // ============================================================
+    // concatenacion de operadores (precedencia implicita)
+    // ============================================================
+    println("=== Precedencia ===");
+    println(a + b * 2);
+    println((a + b) * 2);
+    println(a + b > 5 && b < 10);
+
+    // ============================================================
+    // operand: parentesis ( expression )
+    // ============================================================
+    println("=== Parentesis ===");
+    println((a + b) * (a - b));
+    println(((a + b)));
+
+    // ============================================================
+    // assignmentStatement: ASSIGN (=)
+    // ============================================================
+    println("=== Assignments ===");
+    var x int = 10;
+    x = 42;
+    println(x);
+
+    // ============================================================
+    // assignmentStatement: compound assignments
+    //   PLUS_ASSIGN, MINUS_ASSIGN, STAR_ASSIGN, DIV_ASSIGN, MOD_ASSIGN
+    // ============================================================
+    x = 10;
+    x += 5;
+    println(x);
+    x -= 2;
+    println(x);
+    x *= 3;
+    println(x);
+    x /= 3;
+    println(x);
+    x %= 4;
+    println(x);
+
+    // ============================================================
+    // assignmentStatement: bitwise compound assignments
+    //   AMP_ASSIGN, PIPE_ASSIGN, CARET_ASSIGN, LSHIFT_ASSIGN,
+    //   RSHIFT_ASSIGN, BIT_CLEAR_ASSIGN
+    // ============================================================
+    var y int = 42;
+    y &= 7;
+    println(y);
+    y = 42;
+    y |= 1;
+    println(y);
+    y = 42;
+    y ^= 15;
+    println(y);
+    y = 42;
+    y <<= 1;
+    println(y);
+    y = 42;
+    y >>= 1;
+    println(y);
+    y = 42;
+    y &^= 7;
+    println(y);
+
+    // ============================================================
+    // INCREMENT, DECREMENT
+    // ============================================================
+    println("=== Inc/Dec ===");
+    var z int = 5;
+    z++;
+    println(z);
+    z--;
+    println(z);
+
+    // ============================================================
+    // simpleStatement: DECLARE_ASSIGN (:=)
+    // ============================================================
+    w := 100;
+    println(w);
+
+    // ============================================================
+    // primaryExpression: index [ expression ]
+    // ============================================================
+    println("=== Index ===");
+    var arr [5]int;
+    arr[0] = 11;
+    arr[1] = 22;
+    arr[2] = 33;
+    println(arr[0]);
+    println(arr[1]);
+    println(arr[2]);
+
+    // ============================================================
+    // primaryExpression: selector . IDENTIFIER
+    // ============================================================
+    println("=== Selector ===");
+    var p Point;
+    p.x = 77;
+    p.y = 88;
+    println(p.x);
+    println(p.y);
+
+    // ============================================================
+    // expressionList: multiple expressions
+    // ============================================================
+    println("=== ExpressionList ===");
+    var m1, m2 int = 1 + 2, 3 * 4;
+    println(m1);
+    println(m2);
+
+    // ============================================================
+    // argument: ( expressionList | epsilon )
+    // ============================================================
+    println("=== Arguments ===");
+    println(a, b, a + b);
+};
+
+type Point struct {
+    x int;
+    y int;
+};
