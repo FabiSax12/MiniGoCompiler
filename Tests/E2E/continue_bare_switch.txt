@@ -1,0 +1,94 @@
+/*
+ * ============================================================================
+ * E2E Test: continue + bare switch (formas 3 y 4)
+ * ============================================================================
+ *
+ * Cubre los elementos que estaban en Faltantes.md secciones 1.1, 2.1 y 2.2.
+ *
+ * Salida esperada:
+ *   continue while: 2
+ *   continue while: 4
+ *   continue classic: 1
+ *   continue classic: 3
+ *   continue classic: 5
+ *   bare switch 3 con init: grande
+ *   bare switch 4 sin init: grande
+ *   bare switch 4 sin init: positivo
+ *   bare switch 4 sin init: otro
+ * ============================================================================
+ */
+
+package main;
+
+// continue en for while-style (Forma 2): imprime solo los pares > 0
+func testContinueWhile() {
+    var i int = 0;
+    for i < 5 {
+        i++;
+        if i == 1 {
+            continue;
+        };
+        if i == 3 {
+            continue;
+        };
+        if i == 5 {
+            continue;
+        };
+        print("continue while: ");
+        println(i);
+    };
+};
+
+// continue en for clasico (Forma 3 init;cond;post): salta los pares
+func testContinueClassic() {
+    for j := 0; j < 6; j++ {
+        if j == 0 {
+            continue;
+        };
+        if j == 2 {
+            continue;
+        };
+        if j == 4 {
+            continue;
+        };
+        print("continue classic: ");
+        println(j);
+    };
+};
+
+// bare switch Forma 3: SWITCH simpleStatement ; { case expr: ... }
+// y = x * 2 = 12 > 10 → "grande"
+func testBareSwitchWithInit(x int) {
+    switch y := x * 2; {
+        case y > 10:
+            println("bare switch 3 con init: grande");
+        case y == 0:
+            println("bare switch 3 con init: cero");
+        default:
+            println("bare switch 3 con init: otro");
+    };
+};
+
+// bare switch Forma 4: SWITCH { case expr: ... }
+func testBareSwitchNoInit(n int) {
+    switch {
+        case n > 100:
+            print("bare switch 4 sin init: ");
+            println("grande");
+        case n > 0:
+            print("bare switch 4 sin init: ");
+            println("positivo");
+        default:
+            print("bare switch 4 sin init: ");
+            println("otro");
+    };
+};
+
+func main() {
+    testContinueWhile();
+    testContinueClassic();
+    testBareSwitchWithInit(6);
+    testBareSwitchNoInit(200);
+    testBareSwitchNoInit(5);
+    testBareSwitchNoInit(-1);
+};

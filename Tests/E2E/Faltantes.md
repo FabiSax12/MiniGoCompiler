@@ -17,12 +17,11 @@
 
 ## 1. Tokens del Lexer no funcionales en codegen
 
-### 1.1 CONTINUE
+### 1.1 CONTINUE — ✅ RESUELTO
 - **Token**: `CONTINUE : 'continue';`
 - **Archivo**: `MiniGoLexer.g4:30`
 - **Rule asociada**: `statement : ... | CONTINUE SEMICOLON`
-- **Error**: LLVM IR verification failed — "Terminator found in the middle of a basic block!"
-- **Detalle**: El encoder genera una instruccion `br` (branch) para CONTINUE pero la ubica incorrectamente en el bloque, dejando codigo sin terminar despues del salto.
+- **Fix**: En `VisitLoop`, se creo un `postBlock` dedicado cuando `hasPost == true`. El `contBlock` del `_loopStack` ahora apunta a `postBlock` (no a `condBlock`) para que `continue` ejecute el post-statement (ej. `i++`) antes de volver a evaluar la condicion. El fallthrough del body tambien fue corregido para saltar siempre al `contBlock` (en vez de tener el post inline). Verificado con `Tests/E2E/continue_bare_switch.txt`.
 
 ### 1.2 APPEND
 - **Token**: `APPEND : 'append';`
@@ -40,17 +39,15 @@
 
 ## 2. Rules del Parser no funcionales en codegen
 
-### 2.1 switch — Forma 3 (bare switch con init)
+### 2.1 switch — Forma 3 (bare switch con init) — ✅ RESUELTO
 - **Rule**: `switch : SWITCH simpleStatement SEMICOLON LBRACE expressionCaseClauseList RBRACE`
 - **Archivo**: `MiniGoParser.g4:206`
-- **Error**: LLVM IR verification failed — "Case value is not a constant integer."
-- **Detalle**: En un bare switch (`switch init; { case expr: ... }`), los valores de los cases son expresiones booleanas evaluadas en runtime. LLVM `switch` solo acepta literales enteros constantes como valores de case. El encoder no tiene una estrategia alternativa (encadenar if/else) para bare switches.
+- **Fix**: En `VisitSwitch`, se detecta `isBareSwitch = context.expression() == null` y se delega a `EmitBareSwitch`, que genera una cadena if/else evaluando cada case expression en runtime. El `default` se emite al final si ninguna condicion matcheo. Verificado con `Tests/E2E/continue_bare_switch.txt`.
 
-### 2.2 switch — Forma 4 (bare switch sin init ni expr)
+### 2.2 switch — Forma 4 (bare switch sin init ni expr) — ✅ RESUELTO
 - **Rule**: `switch : SWITCH LBRACE expressionCaseClauseList RBRACE`
 - **Archivo**: `MiniGoParser.g4:207`
-- **Error**: LLVM IR verification failed — "Case value is not a constant integer."
-- **Detalle**: Mismo problema que Forma 3. `switch { case x > 0: ... }` requiere evaluar expresiones booleanas como valores de case, cosa que LLVM `switch` no soporta.
+- **Fix**: Mismo `EmitBareSwitch` que Forma 3 — la deteccion `context.expression() == null` cubre ambas formas. Verificado con `Tests/E2E/continue_bare_switch.txt`.
 
 ### 2.3 structDeclType — Structs pasados por valor
 - **Rule**: `funcFrontDecl : FUNC IDENTIFIER LPAREN (funcArgDecls|ε) RPAREN (declType|ε)`
@@ -58,11 +55,10 @@
 - **Error**: LLVM IR verification failed — "Call parameter type does not match function signature!"
 - **Detalle**: Cuando una funcion recibe o retorna un struct por valor (e.g. `func modifyItem(it Item, ...) Item`), el encoder genera tipos LLVM inconsistentes entre el callsite y la definicion de la funcion (`{ i32, ptr }` vs lo esperado). El acceso a structs locales (selector + assign a campos) si funciona.
 
-### 2.4 simpleStatement — CONTINUE no implementado
+### 2.4 simpleStatement — CONTINUE — ✅ RESUELTO
 - **Rule**: `statement : ... | CONTINUE SEMICOLON`
 - **Archivo**: `MiniGoParser.g4:155`
-- **Error**: Ver seccion 1.1 (CONTINUE)
-- **Detalle**: El parser acepta `continue;` en loops, pero el encoder genera IR invalido.
+- **Fix**: Ver seccion 1.1. Resuelto con `postBlock` dedicado en `VisitLoop`.
 
 ### 2.5 primaryExpression — appendExpression no implementado
 - **Rule**: `primaryExpression : ... | appendExpression`
@@ -97,10 +93,10 @@ Segun el documento "Requerimientos Generales" y "Elementos a implementar para ge
 
 | Elemento | Parser | TypeChecker | Encoder |
 |---|---|---|---|
-| `continue` | OK | OK | CRASH |
+| `continue` | OK | OK | ✅ OK |
 | `append()` | OK | OK | CRASH (NRE) |
 | `cap()` | OK | OK | CRASH (NRE) |
-| `switch` bare (formas 3, 4) | OK | OK | CRASH (LLVM IR) |
+| `switch` bare (formas 3, 4) | OK | OK | ✅ OK |
 | Struct by-value param/return | OK | OK | CRASH (LLVM IR) |
 | `break` | OK | OK | OK |
 | `len()` | OK | OK | OK |
@@ -114,7 +110,8 @@ Los siguientes archivos de test evitan deliberadamente los elementos no funciona
 para mantenerse en Happy Path. Las limitaciones del encoder estan documentadas
 en sus respectivos headers:
 
-- `control_flow.txt` — omite `continue` y bare switch (formas 3/4)
+- `control_flow.txt` — omite `continue` y bare switch (formas 3/4) por limitacion historica; ambos ya funcionan
+- `continue_bare_switch.txt` — test dedicado que cubre `continue` en while y for clasico, bare switch formas 3 y 4
 - `functions_builtins.txt` — omite `append()`, `cap()`, y structs por valor
 - `declarations_types.txt` — usa `len(slice)` en lugar de `append` para ejercitar slice
 - `operations.txt` — no afectado (no usa los elementos problematicos)

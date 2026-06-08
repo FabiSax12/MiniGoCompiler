@@ -1370,11 +1370,16 @@ public sealed class MiniGoEncoder : MiniGoParserBaseVisitor<object>, IDisposable
 
 		// ── Block layout ──────────────────────────────────────────────────────
 		// cond_block only needed when there is a condition expression.
+		// post_block only needed when there is a post statement (for init;cond;post).
+		// continue must jump to post_block (not cond_block) so the post runs first.
 		// exit_block is always created; it may be unreachable for infinite loops.
 		LLVMBasicBlockRef condBlock = hasCond
 			? _currentFunction.AppendBasicBlock("loop.cond")
 			: default;
 		LLVMBasicBlockRef bodyBlock = _currentFunction.AppendBasicBlock("loop.body");
+		LLVMBasicBlockRef postBlock = hasPost
+			? _currentFunction.AppendBasicBlock("loop.post")
+			: default;
 		LLVMBasicBlockRef exitBlock = _currentFunction.AppendBasicBlock("loop.exit");
 
 		// Jump into the loop: check condition first, or go straight to body
@@ -1395,10 +1400,13 @@ public sealed class MiniGoEncoder : MiniGoParserBaseVisitor<object>, IDisposable
 		}
 
 		// ── Body ──────────────────────────────────────────────────────────────
-		// Push loop context so break/continue inside the body know where to jump.
-		// continue → back to condition check (or body start for infinite loops)
-		// break    → straight to exit block
-		LLVMBasicBlockRef contBlock = hasCond ? condBlock : bodyBlock;
+		// contBlock for continue:
+		//   - has post  → postBlock  (post runs, then loops back to cond/body)
+		//   - has cond  → condBlock  (while-style: re-evaluate condition)
+		//   - neither   → bodyBlock  (infinite loop: restart body)
+		LLVMBasicBlockRef contBlock = hasPost ? postBlock
+		                            : hasCond ? condBlock
+		                            :           bodyBlock;
 		_loopStack.Push((exitBlock, contBlock));
 
 		PositionAtEnd(bodyBlock);
@@ -1406,14 +1414,20 @@ public sealed class MiniGoEncoder : MiniGoParserBaseVisitor<object>, IDisposable
 
 		_loopStack.Pop();
 
-		// Post statement runs at the end of each iteration (e.g. i++)
-		// Skip if the body already terminated (e.g. a return/break/continue).
-		if (hasPost && _builder.InsertBlock.Terminator == default)
-			Visit(stmts[1]);
-
-		// Back-edge: jump back to condition check (or body for infinite loops)
+		// Fall through from body to post (or back-edge) only if not already terminated.
 		if (_builder.InsertBlock.Terminator == default)
-			_builder.BuildBr(hasCond ? condBlock : bodyBlock);
+			_builder.BuildBr(contBlock);
+
+		// ── Post ──────────────────────────────────────────────────────────────
+		// Emit the post statement in its own dedicated block so continue can land here.
+		if (hasPost)
+		{
+			PositionAtEnd(postBlock);
+			Visit(stmts[1]);
+			// After post, always jump back to cond (or body for no-cond loops).
+			if (_builder.InsertBlock.Terminator == default)
+				_builder.BuildBr(hasCond ? condBlock : bodyBlock);
+		}
 
 		// ── Exit — execution continues here after the loop ────────────────────
 		PositionAtEnd(exitBlock);
@@ -1427,11 +1441,6 @@ public sealed class MiniGoEncoder : MiniGoParserBaseVisitor<object>, IDisposable
 		if (context.simpleStatement() != null)
 			Visit(context.simpleStatement());
 
-		// Subject expression (may be absent for a tagless switch — treat as true i.e. 1).
-		LLVMValueRef subject = context.expression() != null
-			? VisitExpr(context.expression())
-			: LLVMValueRef.CreateConstInt(IntType, 1, false);
-
 		// Collect all clauses.
 		var clauses = new List<MiniGoParser.ExpressionCaseClauseContext>();
 		var clauseList = context.expressionCaseClauseList();
@@ -1441,10 +1450,25 @@ public sealed class MiniGoEncoder : MiniGoParserBaseVisitor<object>, IDisposable
 			clauseList = clauseList.expressionCaseClauseList();
 		}
 
-		// Create one basic block per clause plus an exit block.
-		LLVMBasicBlockRef exitBlock    = _currentFunction.AppendBasicBlock("switch.exit");
-		LLVMBasicBlockRef defaultBlock = exitBlock; // default falls through to exit unless overridden
+		LLVMBasicBlockRef exitBlock = _currentFunction.AppendBasicBlock("switch.exit");
 
+		// Bare switch (forms 3 & 4): no subject expression — cases are boolean expressions.
+		// LLVM `switch` only accepts constant integer case values, so we generate an
+		// if/else chain instead: each case condition is evaluated and branched on.
+		bool isBareSwitch = context.expression() == null;
+		if (isBareSwitch)
+		{
+			EmitBareSwitch(clauses, exitBlock);
+			PositionAtEnd(exitBlock);
+			return null;
+		}
+
+		// Tagged switch (forms 1 & 2): subject is an integer expression.
+		// Use LLVM `switch` instruction — case values must be constant integers.
+		LLVMValueRef subject = VisitExpr(context.expression());
+
+		// Create one basic block per clause.
+		LLVMBasicBlockRef defaultBlock = exitBlock;
 		var caseBlocks = new List<LLVMBasicBlockRef>();
 		foreach (var clause in clauses)
 		{
@@ -1455,14 +1479,13 @@ public sealed class MiniGoEncoder : MiniGoParserBaseVisitor<object>, IDisposable
 		}
 
 		// Emit the LLVM switch instruction.
-		// BuildSwitch(value, defaultBlock, numCases) creates the dispatch.
 		var sw = _builder.BuildSwitch(subject, defaultBlock, (uint)clauses.Count);
 
 		// Add each CASE value → block mapping.
 		for (int ci = 0; ci < clauses.Count; ci++)
 		{
 			var switchCase = clauses[ci].expressionSwitchCase();
-			if (switchCase.DEFAULT() != null) continue; // default already set above
+			if (switchCase.DEFAULT() != null) continue;
 
 			var exprs = switchCase.expressionList().expression();
 			foreach (var expr in exprs)
@@ -1478,7 +1501,6 @@ public sealed class MiniGoEncoder : MiniGoParserBaseVisitor<object>, IDisposable
 		{
 			PositionAtEnd(caseBlocks[ci]);
 			Visit(clauses[ci].statementList());
-			// No fallthrough in MiniGo — jump to exit if the body didn't already terminate.
 			if (_builder.InsertBlock.Terminator == default)
 				_builder.BuildBr(exitBlock);
 		}
@@ -1486,6 +1508,86 @@ public sealed class MiniGoEncoder : MiniGoParserBaseVisitor<object>, IDisposable
 
 		PositionAtEnd(exitBlock);
 		return null;
+	}
+
+	/// <summary>
+	/// Emits a bare switch (no subject expression) as an if/else chain.
+	/// Each case expression is evaluated at runtime; the first truthy one wins.
+	/// The default clause (if any) runs when no case matched.
+	/// </summary>
+	private void EmitBareSwitch(
+		List<MiniGoParser.ExpressionCaseClauseContext> clauses,
+		LLVMBasicBlockRef exitBlock)
+	{
+		// Separate the default clause from the non-default ones.
+		MiniGoParser.ExpressionCaseClauseContext? defaultClause = null;
+		var nonDefaultClauses = new List<MiniGoParser.ExpressionCaseClauseContext>();
+		foreach (var clause in clauses)
+		{
+			if (clause.expressionSwitchCase().DEFAULT() != null)
+				defaultClause = clause;
+			else
+				nonDefaultClauses.Add(clause);
+		}
+
+		// Build one body block per non-default clause.
+		var bodyBlocks = nonDefaultClauses
+			.Select((_, i) => _currentFunction.AppendBasicBlock($"switch.bare.body{i}"))
+			.ToList();
+
+		LLVMBasicBlockRef defaultBodyBlock = defaultClause != null
+			? _currentFunction.AppendBasicBlock("switch.bare.default")
+			: exitBlock;
+
+		_loopStack.Push((exitBlock, exitBlock));
+
+		// Chain: for each case, evaluate its condition list and branch.
+		// Multiple expressions in one case (case a, b:) are OR-ed together.
+		for (int ci = 0; ci < nonDefaultClauses.Count; ci++)
+		{
+			var switchCase = nonDefaultClauses[ci].expressionSwitchCase();
+			var exprs = switchCase.expressionList().expression();
+
+			// nextBlock: where to go if none of this case's conditions matched.
+			LLVMBasicBlockRef nextBlock = ci + 1 < nonDefaultClauses.Count
+				? _currentFunction.AppendBasicBlock($"switch.bare.check{ci + 1}")
+				: defaultBodyBlock;
+
+			// Evaluate all expressions for this case, OR them together.
+			LLVMValueRef combined = default;
+			foreach (var expr in exprs)
+			{
+				LLVMValueRef val = VisitExpr(expr);
+				if (val.TypeOf != BoolType)
+					val = _builder.BuildICmp(LLVMIntPredicate.LLVMIntNE,
+						val, LLVMValueRef.CreateConstInt(val.TypeOf, 0, false), "tobool");
+
+				combined = combined == default ? val : _builder.BuildOr(combined, val, "case_or");
+			}
+
+			_builder.BuildCondBr(combined, bodyBlocks[ci], nextBlock);
+
+			// Emit this case's body.
+			PositionAtEnd(bodyBlocks[ci]);
+			Visit(nonDefaultClauses[ci].statementList());
+			if (_builder.InsertBlock.Terminator == default)
+				_builder.BuildBr(exitBlock);
+
+			// Position builder at the next check block (if we created one).
+			if (ci + 1 < nonDefaultClauses.Count)
+				PositionAtEnd(nextBlock);
+		}
+
+		// Emit default clause body (if any).
+		if (defaultClause != null)
+		{
+			PositionAtEnd(defaultBodyBlock);
+			Visit(defaultClause.statementList());
+			if (_builder.InsertBlock.Terminator == default)
+				_builder.BuildBr(exitBlock);
+		}
+
+		_loopStack.Pop();
 	}
 
 	public override object VisitExpressionCaseClauseList(MiniGoParser.ExpressionCaseClauseListContext context)
