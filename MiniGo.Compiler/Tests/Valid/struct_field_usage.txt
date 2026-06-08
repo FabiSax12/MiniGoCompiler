@@ -8,6 +8,6 @@ type User struct {
 func main() {
 	var u User;
 	u.id = 42;
-	u.name = "Yo mer";
+	u.name = "Joseph";
 	println(u.name);
 };
