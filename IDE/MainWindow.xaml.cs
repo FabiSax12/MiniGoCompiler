@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.IO;
+using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -640,6 +641,34 @@ public partial class MainWindow : Window
         }
     }
 
+    /// <summary>
+    /// Resolves the path to the bundled ld.lld.exe linker relative to the IDE output directory.
+    /// Tools are copied to the output directory by the .csproj content item.
+    /// </summary>
+    private static string ResolveLinkerPath()
+    {
+        string baseDir = AppDomain.CurrentDomain.BaseDirectory;
+        return Path.GetFullPath(Path.Combine(baseDir, "tools", "ld.lld.exe"));
+    }
+
+    /// <summary>
+    /// Resolves the bundled MinGW library search path relative to the IDE output directory.
+    /// </summary>
+    private static string ResolveToolsLibPath()
+    {
+        string baseDir = AppDomain.CurrentDomain.BaseDirectory;
+        return Path.GetFullPath(Path.Combine(baseDir, "tools", "x86_64-w64-mingw32", "lib"));
+    }
+
+    /// <summary>
+    /// Resolves the bundled clang_rt builtins library path relative to the IDE output directory.
+    /// </summary>
+    private static string ResolveClangRtLibPath()
+    {
+        string baseDir = AppDomain.CurrentDomain.BaseDirectory;
+        return Path.GetFullPath(Path.Combine(baseDir, "tools", "lib", "clang", "22", "lib", "windows"));
+    }
+
     private async Task ExecuteRunAsync()
     {
         if (string.IsNullOrEmpty(_currentFilePath))
@@ -648,36 +677,42 @@ public partial class MainWindow : Window
             return;
         }
 
-        string llPath = Path.ChangeExtension(_currentFilePath, ".ll");
-        if (!File.Exists(llPath))
+        await ExecuteBuildAsync();
+
+        string objPath = Path.ChangeExtension(_currentFilePath, ".obj");
+        if (!File.Exists(objPath))
         {
-            SetOutput($"No .ll file found at:\n  {llPath}\nRun Build (F6) first.");
             return;
         }
 
-        string? clangExe = ResolveClangPath();
-        if (clangExe == null)
+        string linkerPath = ResolveLinkerPath();
+        if (!File.Exists(linkerPath))
         {
             SetOutput(
-                "Failed to find clang: executable not found.\n\n" +
-                "Make sure LLVM-MinGW is installed:\n" +
-                "  winget install MartinStorsjo.LLVM-MinGW\n\n" +
-                "After installing, restart the IDE or add the LLVM-MinGW bin folder to your system PATH.");
-            UpdateStatus("Run error — clang not found");
+                "Linker (ld.lld.exe) not found in bundled tools.\n" +
+                "Make sure the IDE was built correctly and the tools/ folder is present.");
+            UpdateStatus("Run error — linker not found");
             runButton.IsEnabled = true;
             return;
         }
 
-        string tempDir = Path.Combine(Path.GetTempPath(), "MiniGoIDE");
+        string libDir   = ResolveToolsLibPath();
+        string rtLibDir = ResolveClangRtLibPath();
+        string tempDir  = Path.Combine(Path.GetTempPath(), "MiniGoIDE");
         Directory.CreateDirectory(tempDir);
-        string exePath = Path.Combine(tempDir, $"minigo_run_{Guid.NewGuid():N}.exe");
+        string exePath  = Path.Combine(tempDir, $"minigo_run_{Guid.NewGuid():N}.exe");
+        string crt2Path = Path.Combine(libDir, "crt2.o");
+
+        string linkerArgs = $"-m i386pep \"{objPath}\" -o \"{exePath}\" \"{crt2Path}\"" +
+            $" -L \"{libDir}\" -L \"{rtLibDir}\"" +
+            " -lmingw32 -lmsvcrt -lmingwex -lkernel32 -lntdll -lclang_rt.builtins-x86_64";
 
         try
         {
-            SetOutput($"Compiling {Path.GetFileName(llPath)}...\n");
-            UpdateStatus("Compiling…");
+            SetOutput($"Linking {Path.GetFileName(objPath)}...\n");
+            UpdateStatus("Linking…");
 
-            var compilePsi = new ProcessStartInfo(clangExe, $"\"{llPath}\" -o \"{exePath}\"")
+            var linkPsi = new ProcessStartInfo(linkerPath, linkerArgs)
             {
                 RedirectStandardOutput = true,
                 RedirectStandardError  = true,
@@ -685,16 +720,16 @@ public partial class MainWindow : Window
                 CreateNoWindow         = true
             };
 
-            using var compileProc = Process.Start(compilePsi)!;
-            string compileStdout = await compileProc.StandardOutput.ReadToEndAsync();
-            string compileStderr = await compileProc.StandardError.ReadToEndAsync();
-            await compileProc.WaitForExitAsync();
+            using var linkProc = Process.Start(linkPsi)!;
+            string linkStdout = await linkProc.StandardOutput.ReadToEndAsync();
+            string linkStderr = await linkProc.StandardError.ReadToEndAsync();
+            await linkProc.WaitForExitAsync();
 
-            if (compileProc.ExitCode != 0)
+            if (linkProc.ExitCode != 0)
             {
-                string compileOutput = (compileStdout + (compileStderr.Length > 0 ? "\n" + compileStderr : "")).TrimEnd();
-                SetOutput($"Compilation failed (exit code {compileProc.ExitCode}):\n{compileOutput}");
-                UpdateStatus("Compile error");
+                string linkOutput = (linkStdout + (linkStderr.Length > 0 ? "\n" + linkStderr : "")).TrimEnd();
+                SetOutput($"Linking failed (exit code {linkProc.ExitCode}):\n{linkOutput}");
+                UpdateStatus("Link error");
                 runButton.IsEnabled = true;
                 return;
             }
@@ -708,7 +743,7 @@ public partial class MainWindow : Window
                 RedirectStandardError  = true,
                 UseShellExecute        = false,
                 CreateNoWindow         = true,
-                WorkingDirectory       = Path.GetDirectoryName(llPath) ?? ""
+                WorkingDirectory       = Path.GetDirectoryName(objPath) ?? ""
             };
 
             using var runProc = Process.Start(runPsi)!;
@@ -722,7 +757,7 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            SetOutput($"Failed to run:\n{ex.Message}\n\nMake sure LLVM-MinGW is installed and clang is on your PATH.");
+            SetOutput($"Failed to run:\n{ex.Message}");
             UpdateStatus("Run error");
         }
         finally
@@ -732,55 +767,97 @@ public partial class MainWindow : Window
         }
     }
 
+    private static readonly System.Text.RegularExpressions.Regex _ansiPattern =
+        new(@"\x1b\[([0-9;]*)m", System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    private static readonly Dictionary<int, System.Windows.Media.Color> _ansiColors = new()
+    {
+        { 30, System.Windows.Media.Color.FromRgb(0x80, 0x80, 0x80) }, // Black (dim)
+        { 31, System.Windows.Media.Color.FromRgb(0xF4, 0x47, 0x47) }, // Red
+        { 32, System.Windows.Media.Color.FromRgb(0x6A, 0xD5, 0x6A) }, // Green
+        { 33, System.Windows.Media.Color.FromRgb(0xFF, 0xD7, 0x00) }, // Yellow
+        { 34, System.Windows.Media.Color.FromRgb(0x56, 0x9C, 0xD6) }, // Blue
+        { 35, System.Windows.Media.Color.FromRgb(0xBD, 0x85, 0xD7) }, // Magenta
+        { 36, System.Windows.Media.Color.FromRgb(0x4E, 0xC9, 0xB0) }, // Cyan
+        { 37, System.Windows.Media.Color.FromRgb(0xCC, 0xCC, 0xCC) }, // White
+        { 90, System.Windows.Media.Color.FromRgb(0x80, 0x80, 0x80) }, // Bright Black (dim)
+        { 91, System.Windows.Media.Color.FromRgb(0xF4, 0x47, 0x47) }, // Bright Red
+        { 92, System.Windows.Media.Color.FromRgb(0x6A, 0xD5, 0x6A) }, // Bright Green
+        { 93, System.Windows.Media.Color.FromRgb(0xFF, 0xD7, 0x00) }, // Bright Yellow
+        { 94, System.Windows.Media.Color.FromRgb(0x56, 0x9C, 0xD6) }, // Bright Blue
+        { 95, System.Windows.Media.Color.FromRgb(0xBD, 0x85, 0xD7) }, // Bright Magenta
+        { 96, System.Windows.Media.Color.FromRgb(0x4E, 0xC9, 0xB0) }, // Bright Cyan
+        { 97, System.Windows.Media.Color.FromRgb(0xFF, 0xFF, 0xFF) }, // Bright White
+    };
+
+    private System.Windows.Media.Color _currentForeground = System.Windows.Media.Color.FromRgb(0xCC, 0xCC, 0xCC);
+
+    private System.Windows.Documents.FlowDocument CreateColoredDocument(string text)
+    {
+        var doc = new System.Windows.Documents.FlowDocument();
+        var para = new System.Windows.Documents.Paragraph { Margin = new System.Windows.Thickness(0), LineHeight = 1 };
+        int lastIndex = 0;
+
+        foreach (Match match in _ansiPattern.Matches(text))
+        {
+            if (match.Index > lastIndex)
+            {
+                para.Inlines.Add(new System.Windows.Documents.Run(text[lastIndex..match.Index])
+                {
+                    Foreground = new System.Windows.Media.SolidColorBrush(_currentForeground)
+                });
+            }
+
+            string codeStr = match.Groups[1].Value;
+            if (string.IsNullOrEmpty(codeStr))
+            {
+                _currentForeground = System.Windows.Media.Color.FromRgb(0xCC, 0xCC, 0xCC);
+            }
+            else
+            {
+                foreach (string part in codeStr.Split(';'))
+                {
+                    if (int.TryParse(part, out int code))
+                    {
+                        if (code == 0)
+                            _currentForeground = System.Windows.Media.Color.FromRgb(0xCC, 0xCC, 0xCC);
+                        else if (_ansiColors.TryGetValue(code, out var color))
+                            _currentForeground = color;
+                    }
+                }
+            }
+
+            lastIndex = match.Index + match.Length;
+        }
+
+        if (lastIndex < text.Length)
+        {
+            para.Inlines.Add(new System.Windows.Documents.Run(text[lastIndex..])
+            {
+                Foreground = new System.Windows.Media.SolidColorBrush(_currentForeground)
+            });
+        }
+
+        doc.Blocks.Add(para);
+        return doc;
+    }
+
     private void SetOutput(string text)
     {
-        outputPanel.Text = text + "\n";
+        outputPanel.Document = CreateColoredDocument(text);
         outputPanel.ScrollToEnd();
     }
 
     private void AppendOutput(string text)
     {
-        outputPanel.Text += text + "\n";
+        var doc = CreateColoredDocument(text);
+        // Materialise before iterating — a block can only belong to one parent,
+        // so adding it to outputPanel.Blocks removes it from doc.Blocks,
+        // which would modify the collection mid-enumeration.
+        var blocks = doc.Blocks.ToList();
+        foreach (var block in blocks)
+            outputPanel.Document.Blocks.Add(block);
         outputPanel.ScrollToEnd();
-    }
-
-    /// <summary>
-    /// Resolves the path to the clang executable.
-    /// First checks PATH via where/which, then probes common LLVM-MinGW install locations on Windows.
-    /// Returns null if clang cannot be found.
-    /// </summary>
-    private static string? ResolveClangPath()
-    {
-        // 1. Check if "clang" resolves on the system PATH.
-        try
-        {
-            var probe = new ProcessStartInfo("clang", "--version")
-            {
-                RedirectStandardOutput = true,
-                RedirectStandardError  = true,
-                UseShellExecute        = false,
-                CreateNoWindow         = true
-            };
-            using var p = Process.Start(probe);
-            p?.WaitForExit(2000);
-            if (p?.ExitCode == 0)
-                return "clang";
-        }
-        catch { /* not on PATH */ }
-
-        // 2. Probe common LLVM-MinGW install locations.
-        var candidates = new[]
-        {
-            @"C:\Users\varga\AppData\Local\Microsoft\WinGet\Packages\MartinStorsjo.LLVM-MinGW.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe\llvm-mingw-20260421-ucrt-x86_64\bin\clang.exe",
-            @"C:\Program Files\LLVM\bin\clang.exe",
-            @"C:\LLVM\bin\clang.exe",
-        };
-
-        foreach (var path in candidates)
-            if (File.Exists(path))
-                return path;
-
-        return null;
     }
 
     #endregion

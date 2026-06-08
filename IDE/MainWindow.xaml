@@ -79,7 +79,7 @@
                 <Button x:Name="runButton"
                         Content="▶ Run"
                         Click="OnRunClick"
-                        ToolTip="Run generated .ll file (F5)"
+                        ToolTip="Build, link and run (F5)"
                         Padding="14,5"
                         Background="#388A34"
                         Foreground="White"
@@ -383,15 +383,14 @@
                     </Border>
 
                     <!-- Output Content -->
-                    <TextBox Grid.Row="2"
+                    <RichTextBox Grid.Row="2"
                              x:Name="outputPanel"
                              IsReadOnly="True"
                              FontFamily="Consolas" FontSize="12"
-                             Background="#0C0C0C" Foreground="#CCCCCC"
+                             Background="#0C0C0C"
                              BorderThickness="0" Padding="6,4"
                              VerticalScrollBarVisibility="Auto"
-                             HorizontalScrollBarVisibility="Auto"
-                             TextWrapping="NoWrap" />
+                             HorizontalScrollBarVisibility="Auto" />
                 </Grid>
 
                 <!-- Status Bar -->

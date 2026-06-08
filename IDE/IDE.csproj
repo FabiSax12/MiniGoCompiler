@@ -18,6 +18,14 @@
         </Content>
     </ItemGroup>
 
+    <!-- Bundled MinGW linker + runtime: self-contained native compilation pipeline -->
+    <ItemGroup>
+        <Content Include="tools\**\*">
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+            <Link>tools\%(RecursiveDir)%(Filename)%(Extension)</Link>
+        </Content>
+    </ItemGroup>
+
     <ItemGroup>
         <ProjectReference Include="..\MiniGo.Compiler\MiniGo.Compiler.csproj" />
     </ItemGroup>

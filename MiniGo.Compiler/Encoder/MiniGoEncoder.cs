@@ -369,7 +369,28 @@ public sealed class MiniGoEncoder : MiniGoParserBaseVisitor<object>, IDisposable
 
 	#endregion
 
-	#region IR Output
+	#region IR and Native Code Output
+
+	/// <summary>
+	/// Target machine for x86-64 Windows (MinGW ABI). Initialised once per process.
+	/// Emits COFF object files compatible with ld.lld (LLD MinGW linker).
+	/// </summary>
+	private static readonly Lazy<LLVMTargetMachineRef> _x64TargetMachine = new(() =>
+	{
+		LLVM.InitializeX86TargetInfo();
+		LLVM.InitializeX86Target();
+		LLVM.InitializeX86TargetMC();
+		LLVM.InitializeX86AsmPrinter();
+
+		var target = LLVMTargetRef.GetTargetFromTriple("x86_64-w64-windows-gnu");
+		return target.CreateTargetMachine(
+			"x86_64-w64-windows-gnu",
+			"", // default CPU
+			"", // default features
+			LLVMCodeGenOptLevel.LLVMCodeGenLevelDefault,
+			LLVMRelocMode.LLVMRelocDefault,
+			LLVMCodeModel.LLVMCodeModelDefault);
+	});
 
 	/// <summary>
 	/// Verifies the generated module and returns its LLVM IR as a text string.
@@ -391,6 +412,24 @@ public sealed class MiniGoEncoder : MiniGoParserBaseVisitor<object>, IDisposable
 	/// as a <c>.ll</c> text file.
 	/// </summary>
 	public void EmitIrToFile(string path) => File.WriteAllText(path, EmitIr());
+
+	/// <summary>
+	/// Verifies the module and emits a native COFF object file (.obj) for x86-64 Windows
+	/// using LLVM's built-in X86 backend. No external tool (clang, llc) required.
+	/// </summary>
+	/// <param name="path">Output path, e.g. <c>hello.obj</c>.</param>
+	/// <exception cref="InvalidOperationException">
+	/// Thrown when IR verification or native code generation fails.
+	/// </exception>
+	public void EmitObjectFile(string path)
+	{
+		if (!_module.TryVerify(LLVMVerifierFailureAction.LLVMReturnStatusAction, out string error))
+			throw new InvalidOperationException($"LLVM IR verification failed:\n{error}");
+
+		if (!_x64TargetMachine.Value.TryEmitToFile(_module, path,
+			LLVMCodeGenFileType.LLVMObjectFile, out string emitError))
+			throw new InvalidOperationException($"Native code emission failed:\n{emitError}");
+	}
 
 	#endregion
 

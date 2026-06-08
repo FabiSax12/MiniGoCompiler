@@ -85,9 +85,11 @@ public static class Program
 		//     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
 		// This forces .NET to resolve libLLVM.dll from the correct RID-specific path.
 
-		// Output path: same directory and name as the source, with .ll extension.
-		// e.g.  "samples/hello.go"  →  "samples/hello.ll"
-		string outputPath = Path.ChangeExtension(filePath, ".ll");
+		// Output path: same directory and name as the source, with .obj extension.
+		// e.g.  "samples/hello.go"  →  "samples/hello.obj"
+		// Native COFF object file emitted directly from LLVM's X86 backend — no
+		// external toolchain required.
+		string outputPath = Path.ChangeExtension(filePath, ".obj");
 
 		// MiniGoEncoder is IDisposable (owns LLVMModuleRef + LLVMBuilderRef).
 		// The using block guarantees LLVM resources are released even if an
@@ -99,19 +101,20 @@ public static class Program
 			// Walk the parse tree; every Visit* method emits the corresponding IR.
 			encoder.Visit(tree);
 
-			// Verify + serialise. TryVerify() is called internally by EmitIrToFile
-			// via EmitIr(). If verification fails it throws InvalidOperationException
-			// with the LLVM diagnostic message — surfaced below.
-			encoder.EmitIrToFile(outputPath);
+			// Emit native object code via LLVM's X86 backend (LLVMTargetMachine).
+			// Internally calls TryVerify() — if verification fails it throws
+			// InvalidOperationException with the LLVM diagnostic.
+			encoder.EmitObjectFile(outputPath);
 
 			Console.Error.WriteLine("Compilation completed successfully.");
-			Console.Error.WriteLine($"LLVM IR written to: {outputPath}");
+			Console.Error.WriteLine($"Native object file written to: {outputPath}");
 		}
 		catch (InvalidOperationException ex)
 		{
-			// LLVM module verification failed — this is a bug in the encoder, not
-			// in the user's MiniGo source (semantic analysis already passed).
-			Console.Error.WriteLine($"LLVM IR verification error (encoder bug):\n{ex.Message}");
+			// LLVM module verification or native code emission failed.
+			// This is a bug in the encoder, not in the user's MiniGo source
+			// (semantic analysis already passed).
+			Console.Error.WriteLine($"Code generation error (encoder bug):\n{ex.Message}");
 		}
 	}
 }
