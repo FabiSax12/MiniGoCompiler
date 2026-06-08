@@ -1,0 +1,75 @@
+/*
+ * ============================================================================
+ * E2E Test: structs como parametros y retorno por valor
+ * ============================================================================
+ *
+ * Cubre el elemento pendiente en Faltantes.md seccion 2.3:
+ *   struct pasado como argumento de funcion y retornado por valor.
+ *   Tambien verifica que dos structs con igual layout (mismo { i32, i32 })
+ *   no colisionan en el registro de tipos LLVM (named structs).
+ *
+ * Salida esperada:
+ *   punto: 3 4
+ *   suma cuadrados: 25
+ *   punto trasladado: 5 7
+ *   area: 12
+ *   perimetro: 14
+ * ============================================================================
+ */
+
+package main;
+
+type Point struct {
+    x int;
+    y int;
+};
+
+type Rect struct {
+    w int;
+    h int;
+};
+
+// Recibe struct por valor, retorna int
+func sumaCuadrados(p Point) int {
+    return p.x * p.x + p.y * p.y;
+};
+
+// Recibe struct por valor, retorna struct por valor
+func trasladar(p Point, dx int, dy int) Point {
+    var r Point;
+    r.x = p.x + dx;
+    r.y = p.y + dy;
+    return r;
+};
+
+func area(r Rect) int {
+    return r.w * r.h;
+};
+
+func perimetro(r Rect) int {
+    return (r.w + r.h) * 2;
+};
+
+func main() {
+    var p Point;
+    p.x = 3;
+    p.y = 4;
+    print("punto: ");
+    println(p.x, p.y);
+
+    var s int = sumaCuadrados(p);
+    print("suma cuadrados: ");
+    println(s);
+
+    var p2 Point = trasladar(p, 2, 3);
+    print("punto trasladado: ");
+    println(p2.x, p2.y);
+
+    var rc Rect;
+    rc.w = 3;
+    rc.h = 4;
+    print("area: ");
+    println(area(rc));
+    print("perimetro: ");
+    println(perimetro(rc));
+};

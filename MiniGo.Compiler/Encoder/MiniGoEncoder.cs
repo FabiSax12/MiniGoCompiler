@@ -634,7 +634,11 @@ public sealed class MiniGoEncoder : MiniGoParserBaseVisitor<object>, IDisposable
 			base.VisitSingleTypeDecl(context); // descends into structMemDecls, populates _pendingStructFields
 
 			var fieldTypes = _pendingStructFields.Select(f => f.Type).ToArray();
-			var llvmStructType = LLVMTypeRef.CreateStruct(fieldTypes, false);
+			// Use a named struct so LLVM does not deduplicate it with other structs that
+			// happen to have the same field layout (e.g. two {i32,i32} structs).
+			// Named structs have a unique identity regardless of their body.
+			var llvmStructType = LLVMContextRef.Global.CreateNamedStruct(aliasName);
+			llvmStructType.StructSetBody(fieldTypes, false);
 			_structTypes[aliasName] = llvmStructType;
 			_structTypeToName[llvmStructType] = aliasName;
 			_typeAliases[aliasName] = llvmStructType;
@@ -666,8 +670,11 @@ public sealed class MiniGoEncoder : MiniGoParserBaseVisitor<object>, IDisposable
 		string name = front.IDENTIFIER().GetText();
 
 		// ── Return type ──────────────────────────────────────────────────────
+		// LlvmTypeFromDecl handles structs, arrays and type aliases correctly.
+		// LlvmType(TypeResolver.Resolve()) only handles primitives and falls back
+		// to i32 for structs/arrays, causing type-mismatch errors in LLVM IR.
 		LLVMTypeRef returnType = front.declType() != null
-			? LlvmType(TypeResolver.Resolve(front.declType()))
+			? LlvmTypeFromDecl(front.declType())
 			: VoidType;
 
 		// ── Parameter names and types ────────────────────────────────────────
@@ -681,7 +688,7 @@ public sealed class MiniGoEncoder : MiniGoParserBaseVisitor<object>, IDisposable
 		{
 			foreach (var argDecl in front.funcArgDecls().singleVarDeclNoExps())
 			{
-				LLVMTypeRef pType = LlvmType(TypeResolver.Resolve(argDecl.declType()));
+				LLVMTypeRef pType = LlvmTypeFromDecl(argDecl.declType());
 				foreach (var id in argDecl.identifierList().IDENTIFIER())
 				{
 					paramNames.Add(id.GetText());

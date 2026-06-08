@@ -1,0 +1,137 @@
+package main;
+
+// ── Pruebas de len() ──────────────────────────────────────────────────────────
+// len() opera sobre arrays de enteros de tamaño fijo ([n]int).
+// El compilador resuelve len(arr) como constante i32 en tiempo de compilación,
+// equivalente al n declarado en el tipo del arreglo.
+
+// Arrays globales de distintos tamaños
+var small  [3]int;
+var medium [7]int;
+var large  [20]int;
+
+func main() {
+
+    // 1. len() sobre arrays globales
+    println("=== len de arrays globales ===");
+    println("len(small)  :", len(small));
+    println("len(medium) :", len(medium));
+    println("len(large)  :", len(large));
+
+    // 2. len() sobre arrays locales de distintos tamaños
+    println("=== len de arrays locales ===");
+    var a1  [1]int;
+    var a2  [2]int;
+    var a5  [5]int;
+    var a10 [10]int;
+    println("len([1]int)  :", len(a1));
+    println("len([2]int)  :", len(a2));
+    println("len([5]int)  :", len(a5));
+    println("len([10]int) :", len(a10));
+
+    // 3. len() como limite de un for while-style
+    println("=== recorrido con len como limite ===");
+    var nums [5]int;
+    nums[0] = 10;
+    nums[1] = 20;
+    nums[2] = 30;
+    nums[3] = 40;
+    nums[4] = 50;
+    var i int = 0;
+    for i < len(nums) {
+        println("nums[", i, "] =", nums[i]);
+        i++;
+    };
+
+    // 4. len() en un for clasico con init y post
+    println("=== for clasico con len ===");
+    var evens [4]int;
+    evens[0] = 2;
+    evens[1] = 4;
+    evens[2] = 6;
+    evens[3] = 8;
+    for j := 0; j < len(evens); j++ {
+        println("evens[", j, "] =", evens[j]);
+    };
+
+    // 5. len() en expresiones aritméticas
+    println("=== len en expresiones ===");
+    var arr6 [6]int;
+    var arr4 [4]int;
+    println("len(arr6) + len(arr4) :", len(arr6) + len(arr4));
+    println("len(arr6) * 2         :", len(arr6) * 2);
+    println("len(arr6) - len(arr4) :", len(arr6) - len(arr4));
+    println("len(arr6) == 6        :", len(arr6) == 6);
+    println("len(arr4) > len(arr6) :", len(arr4) > len(arr6));
+
+    // 6. len() como condicion de if
+    println("=== len en if ===");
+    var check [3]int;
+    if len(check) > 0 {
+        println("arreglo tiene elementos:", len(check));
+    };
+    if len(check) == 3 {
+        println("largo exactamente 3: correcto");
+    } else {
+        println("largo incorrecto");
+    };
+
+    // 7. len() almacenado en variable entera
+    println("=== len almacenado en variable ===");
+    var tmp [8]int;
+    var n int = len(tmp);
+    println("n = len([8]int) :", n);
+    println("n == 8          :", n == 8);
+    println("n > 5           :", n > 5);
+
+    // 8. len() para sumar todos los elementos manualmente
+    println("=== suma acumulada usando len ===");
+    var data [5]int;
+    data[0] = 3;
+    data[1] = 7;
+    data[2] = 2;
+    data[3] = 9;
+    data[4] = 4;
+    var sum int = 0;
+    var k int = 0;
+    for k < len(data) {
+        sum += data[k];
+        k++;
+    };
+    println("suma de data[0..4] :", sum);
+
+    // 9. len() como limite para buscar el maximo
+    println("=== maximo con len ===");
+    var vals [6]int;
+    vals[0] = 15;
+    vals[1] = 42;
+    vals[2] = 8;
+    vals[3] = 37;
+    vals[4] = 99;
+    vals[5] = 23;
+    var max int = vals[0];
+    var m int = 1;
+    for m < len(vals) {
+        if vals[m] > max {
+            max = vals[m];
+        };
+        m++;
+    };
+    println("maximo en vals :", max);
+
+    // 10. len() en switch
+    println("=== len en switch ===");
+    var sw [3]int;
+    switch len(sw) {
+        case 1:
+            println("largo 1");
+        case 2:
+            println("largo 2");
+        case 3:
+            println("largo 3: correcto");
+        default:
+            println("otro largo");
+    };
+
+    println("=== fin de pruebas len ===");
+};

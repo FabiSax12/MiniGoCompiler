@@ -49,11 +49,13 @@
 - **Archivo**: `MiniGoParser.g4:207`
 - **Fix**: Mismo `EmitBareSwitch` que Forma 3 — la deteccion `context.expression() == null` cubre ambas formas. Verificado con `Tests/E2E/continue_bare_switch.txt`.
 
-### 2.3 structDeclType — Structs pasados por valor
+### 2.3 structDeclType — Structs pasados por valor — ✅ RESUELTO
 - **Rule**: `funcFrontDecl : FUNC IDENTIFIER LPAREN (funcArgDecls|ε) RPAREN (declType|ε)`
 - **Archivo**: `MiniGoParser.g4:44`
-- **Error**: LLVM IR verification failed — "Call parameter type does not match function signature!"
-- **Detalle**: Cuando una funcion recibe o retorna un struct por valor (e.g. `func modifyItem(it Item, ...) Item`), el encoder genera tipos LLVM inconsistentes entre el callsite y la definicion de la funcion (`{ i32, ptr }` vs lo esperado). El acceso a structs locales (selector + assign a campos) si funciona.
+- **Fix (dos cambios en VisitFuncDecl y VisitSingleTypeDecl)**:
+  1. `VisitFuncDecl`: parametros y retorno usaban `LlvmType(TypeResolver.Resolve(...))` que cae a `i32` para structs. Cambiado a `LlvmTypeFromDecl(...)` que resuelve correctamente structs, arrays y aliases.
+  2. `VisitSingleTypeDecl`: se usaba `LLVMTypeRef.CreateStruct(fieldTypes)` (tipo anonimo). LLVM deduplica tipos anonimos con igual layout, causando colision en `_structTypeToName` cuando dos structs tienen los mismos campos (ej. `Point{x,y int}` y `Rect{w,h int}` son ambos `{i32,i32}`). Cambiado a `CreateNamedStruct(aliasName)` + `StructSetBody` para garantizar identidad unica por nombre.
+- Verificado con `Tests/E2E/structs_by_value.txt` (incluye dos structs de igual layout).
 
 ### 2.4 simpleStatement — CONTINUE — ✅ RESUELTO
 - **Rule**: `statement : ... | CONTINUE SEMICOLON`
@@ -85,9 +87,9 @@ Segun el documento "Requerimientos Generales" y "Elementos a implementar para ge
 ### 3.3 CAP
 - **Estado**: Ver 3.2. Mismo caso que APPEND.
 
-### 3.4 Structs como parametros/retorno
+### 3.4 Structs como parametros/retorno — ✅ RESUELTO
 - **Enunciado**: "Existiran ademas estructuras tipo registros con el mismo formato de Golang. Tanto la definicion de la estructura como su posterior uso deben ser validados y verificados."
-- **Estado**: Definicion, declaracion de variables struct, y acceso a campos (selector `.` + assign) funcionan. Pasar structs como argumentos o retornarlos de funciones NO funciona en el encoder.
+- **Estado**: Definicion, declaracion, acceso a campos, paso como argumento y retorno por valor funcionan. Ver seccion 2.3.
 
 ## 4. Resumen
 
@@ -97,7 +99,7 @@ Segun el documento "Requerimientos Generales" y "Elementos a implementar para ge
 | `append()` | OK | OK | CRASH (NRE) |
 | `cap()` | OK | OK | CRASH (NRE) |
 | `switch` bare (formas 3, 4) | OK | OK | ✅ OK |
-| Struct by-value param/return | OK | OK | CRASH (LLVM IR) |
+| Struct by-value param/return | OK | OK | ✅ OK |
 | `break` | OK | OK | OK |
 | `len()` | OK | OK | OK |
 | `switch` con expr entera | OK | OK | OK |
@@ -112,6 +114,7 @@ en sus respectivos headers:
 
 - `control_flow.txt` — omite `continue` y bare switch (formas 3/4) por limitacion historica; ambos ya funcionan
 - `continue_bare_switch.txt` — test dedicado que cubre `continue` en while y for clasico, bare switch formas 3 y 4
-- `functions_builtins.txt` — omite `append()`, `cap()`, y structs por valor
+- `functions_builtins.txt` — omite `append()` y `cap()`; structs por valor ya funcionan
+- `structs_by_value.txt` — test dedicado que cubre structs como parametros y retorno, incluyendo dos structs con igual layout
 - `declarations_types.txt` — usa `len(slice)` en lugar de `append` para ejercitar slice
 - `operations.txt` — no afectado (no usa los elementos problematicos)
