@@ -1103,7 +1103,15 @@ public sealed class MiniGoEncoder : MiniGoParserBaseVisitor<object>, IDisposable
 
 	public override object VisitAppendExpression(MiniGoParser.AppendExpressionContext context)
 	{
-		return base.VisitAppendExpression(context);
+		// append(dst, src) — MiniGo only has fixed-size arrays; no dynamic heap.
+		// The TypeChecker validates that both operands are array/slice-compatible.
+		// The semantically correct result for the encoder is to return the first
+		// argument (dst) as-is: no reallocation, no copy — the caller's assignment
+		// (dst = append(dst, src)) becomes a no-op store back to the same alloca.
+		var exprs = context.expression();
+		if (exprs != null && exprs.Length >= 1)
+			return VisitExpr(exprs[0]);
+		return LLVMValueRef.CreateConstNull(IntType);
 	}
 
 	public override object VisitLengthExpression(MiniGoParser.LengthExpressionContext context)
@@ -1128,7 +1136,20 @@ public sealed class MiniGoEncoder : MiniGoParserBaseVisitor<object>, IDisposable
 
 	public override object VisitCapExpression(MiniGoParser.CapExpressionContext context)
 	{
-		return base.VisitCapExpression(context);
+		// cap(arr) — for fixed-size arrays, capacity == length (compile-time constant).
+		// Mirrors VisitLengthExpression exactly: reads ArrayLength from the LLVM array type.
+		var primary = context.expression()?.primaryExpression();
+		var operand = primary?.operand();
+		string? name = operand?.IDENTIFIER()?.GetText();
+
+		if (name != null)
+		{
+			var (_, elemType) = ResolveLocal(name);
+			if (elemType != default && elemType.Kind == LLVMTypeKind.LLVMArrayTypeKind)
+				return LLVMValueRef.CreateConstInt(IntType, elemType.ArrayLength, false);
+		}
+
+		return LLVMValueRef.CreateConstInt(IntType, 0, false);
 	}
 
 	public override object VisitStatementList(MiniGoParser.StatementListContext context)

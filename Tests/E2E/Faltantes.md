@@ -23,19 +23,17 @@
 - **Rule asociada**: `statement : ... | CONTINUE SEMICOLON`
 - **Fix**: En `VisitLoop`, se creo un `postBlock` dedicado cuando `hasPost == true`. El `contBlock` del `_loopStack` ahora apunta a `postBlock` (no a `condBlock`) para que `continue` ejecute el post-statement (ej. `i++`) antes de volver a evaluar la condicion. El fallthrough del body tambien fue corregido para saltar siempre al `contBlock` (en vez de tener el post inline). Verificado con `Tests/E2E/continue_bare_switch.txt`.
 
-### 1.2 APPEND
+### 1.2 APPEND — ✅ RESUELTO
 - **Token**: `APPEND : 'append';`
 - **Archivo**: `MiniGoLexer.g4:32`
 - **Rule asociada**: `appendExpression : APPEND LPAREN expression COMMA expression RPAREN`
-- **Error**: `System.NullReferenceException` en `MiniGoEncoder.VisitExpr` (line 245)
-- **Detalle**: El encoder no implementa la visita de `appendExpression`; al intentar evaluar la expresion `append(s, valor)` retorna null y casca tanto en asignacion (`s = append(s, x)`) como en paso a funcion (`println(append(s, x))`).
+- **Fix**: `VisitAppendExpression` implementado — evalua el primer argumento (dst) y lo retorna. MiniGo no tiene heap dinamico, por lo que `append` sobre arrays fijos es una identidad: el resultado se asigna de vuelta al mismo alloca sin realloc. Verificado con `Tests/E2E/functions_builtins.txt`.
 
-### 1.3 CAP
+### 1.3 CAP — ✅ RESUELTO
 - **Token**: `CAP : 'cap';`
 - **Archivo**: `MiniGoLexer.g4:34`
 - **Rule asociada**: `capExpression : CAP LPAREN expression RPAREN`
-- **Error**: `System.NullReferenceException` en `MiniGoEncoder.VisitExpr` (line 245)
-- **Detalle**: Identico a APPEND — el encoder no implementa `VisitCapExpression`, retorna null y produce NRE. Tanto LEN como CAP son builtins reconocidos por el parser, pero solo LEN tiene implementacion en el encoder.
+- **Fix**: `VisitCapExpression` implementado — para arrays fijos, `cap == len` (constante i32 en tiempo de compilacion igual a `ArrayLength` del tipo LLVM). Misma logica que `VisitLengthExpression`. Verificado con `Tests/E2E/functions_builtins.txt`.
 
 ## 2. Rules del Parser no funcionales en codegen
 
@@ -62,15 +60,15 @@
 - **Archivo**: `MiniGoParser.g4:155`
 - **Fix**: Ver seccion 1.1. Resuelto con `postBlock` dedicado en `VisitLoop`.
 
-### 2.5 primaryExpression — appendExpression no implementado
+### 2.5 primaryExpression — appendExpression — ✅ RESUELTO
 - **Rule**: `primaryExpression : ... | appendExpression`
 - **Archivo**: `MiniGoParser.g4:107`
-- **Error**: Ver seccion 1.2 (APPEND)
+- **Fix**: Ver seccion 1.2.
 
-### 2.6 primaryExpression — capExpression no implementado
+### 2.6 primaryExpression — capExpression — ✅ RESUELTO
 - **Rule**: `primaryExpression : ... | capExpression`
 - **Archivo**: `MiniGoParser.g4:109`
-- **Error**: Ver seccion 1.3 (CAP)
+- **Fix**: Ver seccion 1.3.
 
 ## 3. Requerimientos del Enunciado no cubiertos
 
@@ -80,12 +78,12 @@ Segun el documento "Requerimientos Generales" y "Elementos a implementar para ge
 - **Enunciado**: "Instrucciones de control de flujo solamente IFs y LOOPs, sin uso de 'break' ni 'continue'."
 - **Estado**: El enunciado EXPLICITAMENTE excluye `continue` y `break`. Sin embargo, el grammar define ambos tokens y rules. `break` SI funciona en el encoder; `continue` NO. Dado que el enunciado los excluye, esto es aceptable pero inconsistente (break si funciona, continue no).
 
-### 3.2 APPEND
+### 3.2 APPEND — ✅ RESUELTO
 - **Enunciado**: "Para los tipos slice, deben considerarse las funciones preestablecidas append, len y cap (para efectos de tipos de entrada y de retorno)"
-- **Estado**: `len` funciona. `append` y `cap` NO. El typechecker si valida tipos de entrada/salida, pero el encoder no genera codigo.
+- **Estado**: `len`, `append` y `cap` funcionan. Ver secciones 1.2 y 1.3.
 
-### 3.3 CAP
-- **Estado**: Ver 3.2. Mismo caso que APPEND.
+### 3.3 CAP — ✅ RESUELTO
+- **Estado**: Ver 3.2 y seccion 1.3.
 
 ### 3.4 Structs como parametros/retorno — ✅ RESUELTO
 - **Enunciado**: "Existiran ademas estructuras tipo registros con el mismo formato de Golang. Tanto la definicion de la estructura como su posterior uso deben ser validados y verificados."
@@ -96,8 +94,8 @@ Segun el documento "Requerimientos Generales" y "Elementos a implementar para ge
 | Elemento | Parser | TypeChecker | Encoder |
 |---|---|---|---|
 | `continue` | OK | OK | ✅ OK |
-| `append()` | OK | OK | CRASH (NRE) |
-| `cap()` | OK | OK | CRASH (NRE) |
+| `append()` | OK | OK | ✅ OK |
+| `cap()` | OK | OK | ✅ OK |
 | `switch` bare (formas 3, 4) | OK | OK | ✅ OK |
 | Struct by-value param/return | OK | OK | ✅ OK |
 | `break` | OK | OK | OK |
