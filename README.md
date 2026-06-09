@@ -1,288 +1,191 @@
-﻿# Mini GO Compiler
+# Mini GO Compiler
 
-Compilador para el lenguaje **Mini GO** desarrollado con:
+Compilador para el lenguaje **Mini GO** — subconjunto de GoLang que genera código máquina real x86 via LLVM.
 
-- C#
-- ANTLR4
+Desarrollado con **C# / .NET 8**, **ANTLR4 4.13.1**, **LLVMSharp.Interop 20.1.2** y **WPF + AvalonEdit 6.3.1**.
 
----
-
-# Requisitos
-
-Antes de ejecutar el proyecto es necesario instalar las siguientes herramientas.
+**Integrantes:**
+- Fabián Ricardo Vargas Araya
+- Joseh Daniel Salas Rivas
 
 ---
 
-# 1. Instalar .NET SDK (C#)
+## ▶ Ejecución rápida sin Rider (solo .NET SDK)
 
-Descargar e instalar:
+> **Si no tenés Rider instalado**, podés compilar y ejecutar el IDE completo con solo el .NET SDK.
 
-https://dotnet.microsoft.com/en-us/download
+### Requisito único: .NET 8 SDK
 
-Verificar instalación:
-
-```powershell
+Verificar si ya está instalado:
+```cmd
 dotnet --version
 ```
+
+Si no está instalado, instalarlo con winget (Windows 10/11):
+```cmd
+winget install Microsoft.DotNet.SDK.8 --accept-package-agreements --accept-source-agreements
+```
+O descarga manual: https://dotnet.microsoft.com/download/dotnet/8.0 → *SDK 8.0.x, Windows x64*
+
+Después de instalar, **cerrar y reabrir** la terminal.
+
 ---
 
-# 2. Instalar Rider
+### Paso 1 — Ubicarse en la raíz del proyecto
 
-Descargar:
+```cmd
+cd ruta\a\MiniGoCompiler
+```
+*(la carpeta que contiene `MiniGoCompiler.sln`)*
 
-[https://www.jetbrains.com/rider/](https://www.jetbrains.com/rider/)
+### Paso 2 — Restaurar dependencias (solo la primera vez)
 
----
+Descarga ANTLR4, LLVMSharp y AvalonEdit desde NuGet (~300 MB, se cachea):
+```cmd
+dotnet restore MiniGoCompiler.sln
+```
 
-# 3. Instalar Java (Necesario para ANTLR)
+### Paso 3 — Compilar toda la solución
 
-ANTLR utiliza Java para generar el lexer y parser.
+```cmd
+dotnet build MiniGoCompiler.sln -c Release
+```
 
-Descargar:
+### Paso 4 — Ejecutar el IDE
 
-[https://adoptium.net/](https://adoptium.net/)
+**CMD:**
+```cmd
+IDE\bin\Release\net8.0-windows\IDE.exe
+```
 
-Verificar instalación:
-
+**PowerShell:**
 ```powershell
+.\IDE\bin\Release\net8.0-windows\IDE.exe
+```
+
+---
+
+### Todo junto (una sola línea)
+
+**CMD:**
+```cmd
+dotnet restore MiniGoCompiler.sln && dotnet build MiniGoCompiler.sln -c Release && IDE\bin\Release\net8.0-windows\IDE.exe
+```
+
+**PowerShell:**
+```powershell
+dotnet restore MiniGoCompiler.sln; if ($?) { dotnet build MiniGoCompiler.sln -c Release }; if ($?) { .\IDE\bin\Release\net8.0-windows\IDE.exe }
+```
+
+---
+
+### Comandos adicionales
+
+| Acción | Comando |
+|---|---|
+| Correr tests | `dotnet test MiniGoCompiler.sln -c Release` |
+| Compilar solo el compilador | `dotnet build MiniGo.Compiler\MiniGo.Compiler.csproj -c Release` |
+| Limpiar binarios | `dotnet clean MiniGoCompiler.sln` |
+
+### Solución de problemas
+
+| Síntoma | Causa | Solución |
+|---|---|---|
+| `libLLVM.dll not found` | Faltó el restore o se usó Debug | Correr `dotnet restore` y usar `-c Release` |
+| Colores del IDE no cargan | `MiniGoHighlighting.xshd` no está junto al exe | Se copia automáticamente al compilar con `-c Release` |
+| Error al compilar en Debug | `MiniGo.Compiler` requiere `win-x64` | Siempre usar `-c Release` |
+| El IDE no abre | WPF solo corre en Windows | Ejecutar desde Windows |
+
+> Los scripts `instalar_dependencias.bat` y `ejecutar_ide.bat` en la raíz del proyecto automatizan estos pasos para Windows.
+
+---
+
+## Desarrollo con Rider (flujo completo)
+
+### Requisitos
+
+- [.NET 8 SDK](https://dotnet.microsoft.com/en-us/download)
+- [JetBrains Rider](https://www.jetbrains.com/rider/)
+- [Java (para ANTLR)](https://adoptium.net/) — solo si se regenera la gramática
+
+Verificar instalaciones:
+```powershell
+dotnet --version
 java -version
 ```
 
----
+### Extensión ANTLR en Rider
 
-# 4. Instalar extensión ANTLR en Rider
-
-Abrir Rider:
-
-```text
-File -> Settings -> Plugins
+Solo necesaria si se modifica la gramática:
 ```
-
-Buscar e instalar:
-
-```text
-ANTLR v4
+File → Settings → Plugins → buscar "ANTLR v4" → instalar → reiniciar
 ```
+Plugin: https://plugins.jetbrains.com/plugin/7358-antlr-v4
 
-Plugin:
-
-[https://plugins.jetbrains.com/plugin/7358-antlr-v4](https://plugins.jetbrains.com/plugin/7358-antlr-v4)
-
-Luego reiniciar Rider.
-
----
-
-# 5. Clonar el proyecto
+### Clonar y abrir
 
 ```powershell
 git clone https://github.com/FabiSax12/MiniGoCompiler.git
 cd MiniGoCompiler
-```
-
----
-
-# 6. Restaurar dependencias
-
-Desde la raíz del proyecto:
-
-```powershell
 dotnet restore
 ```
 
----
-
-# 7. Instalar LLVM (requerido para ejecutar archivos .ll)
-
-El compilador genera código LLVM IR (archivos `.ll`). Para **ejecutar** esos archivos desde el IDE (botón Run / F5) se necesita `lli`, el intérprete de LLVM.
-
-## Opción A — winget (recomendado en Windows)
-
-```powershell
-winget install LLVM.LLVM
-```
-
-Esto instala LLVM en `C:\Program Files\LLVM\bin\` y agrega el directorio al PATH automáticamente.
-
-## Opción B — instalador oficial
-
-Descargar el instalador Windows desde:
-
-https://releases.llvm.org/download.html
-
-Durante la instalación, seleccionar **"Add LLVM to the system PATH"**.
-
-## Verificar instalación
-
-```powershell
-lli --version
-```
-
-Si el comando no se encuentra después de instalar, reiniciar la terminal o el IDE para que tome el nuevo PATH.
-
-> **Nota:** El compilador (build) no requiere LLVM instalado — solo se necesita para la fase de ejecución.
+Abrir `MiniGoCompiler.sln` en Rider. Establecer `IDE` como proyecto de inicio y ejecutar con F5.
 
 ---
 
-# Dependencias utilizadas
-
-```xml
-<ItemGroup>
-    <PackageReference Include="Antlr4.Runtime.Standard" Version="4.13.1" />
-    <PackageReference Include="LLVMSharp.Interop" Version="20.1.2" />
-</ItemGroup>
-```
-
----
-
-# Estructura del proyecto
+## Estructura del proyecto
 
 ```text
 MiniGoCompiler/
-│
-├── Grammar/           # Gramática ANTLR (.g4)
-│
-├── Generated/         # Código generado automáticamente por ANTLR
-│
-├── AST/               # Nodos del AST
-│
-├── Semantic/          # Análisis semántico
-│
-├── Symbols/           # Tabla de símbolos y scopes
-│
-├── Types/             # Sistema de tipos
-│
-├── Codegen/           # Generación de código LLVM
-│
-├── Errors/            # Manejo de errores
-│
-├── Tests/             # Archivos MiniGO de prueba
-│
-├── Program.cs         # Punto de entrada
-│
-├── MiniGoCompiler.csproj
-│
-└── README.md
+├── MiniGo.Compiler/
+│   ├── Grammar/        # Gramática ANTLR (.g4)
+│   ├── Generated/      # Código generado por ANTLR (no editar)
+│   ├── Semantic/       # TypeChecker — chequeo de tipos y alcances
+│   ├── Symbols/        # Tabla de símbolos (SymbolsTable, VarSymbol, MethodSymbol)
+│   ├── Encoder/        # MiniGoEncoder — generación de código LLVM IR
+│   └── Errors/         # Manejo y reporte de errores
+├── IDE/
+│   ├── MainWindow.xaml(.cs)       # IDE principal (WPF + AvalonEdit)
+│   ├── MiniGoHighlighting.xshd    # Resaltado de sintaxis
+│   └── tools/                     # MinGW linker + runtime (ld.lld.exe)
+├── MiniGo.Compiler.Tests/         # Tests unitarios y de integración
+├── samples/                       # Archivos .mgo de prueba
+├── docs/                          # Documentación del proyecto
+└── MiniGoCompiler.sln
 ```
 
 ---
 
-# Generar parser y lexer
+## Dependencias
 
-Ubicarse en la raíz del proyecto.
+```xml
+<!-- MiniGo.Compiler -->
+<PackageReference Include="Antlr4.Runtime.Standard" Version="4.13.1" />
+<PackageReference Include="LLVMSharp.Interop" Version="20.1.2" />
 
-## Generar código ANTLR
-
-Hacer uso de la extensión/plugin del IDE para generar el código
-
-Esto genera:
-
-* Lexer
-* Parser
-* Visitors
-* BaseVisitors
-* Listeners
-
----
-
-# Compilar el proyecto
-
-```powershell
-dotnet build
+<!-- IDE -->
+<PackageReference Include="AvalonEdit" Version="6.3.1.120" />
 ```
 
 ---
 
-# Ejecutar el proyecto
+## Convenciones
 
-```powershell
-dotnet run
-```
-
----
-
-# Convenciones del proyecto
-
-## Código generado
-
-La carpeta `Generated/` es generada automáticamente por ANTLR.
-
-No modificar manualmente estos archivos.
+- No modificar archivos en `Generated/` — son generados por ANTLR automáticamente.
+- Regenerar el parser cada vez que cambie la gramática (`MiniGo.Compiler/Grammar/MiniGo.g4`).
+- Commits pequeños, descriptivos y en español.
+- Mantener separadas las etapas: Parsing → Semantic → Encoder.
 
 ---
 
-## Gramática
+## Tecnologías
 
-Toda la gramática del lenguaje debe mantenerse en:
-
-```text
-Grammar/MiniGo.g4
-```
-
----
-
-## AST
-
-Los nodos del árbol sintáctico abstracto deben ubicarse en:
-
-```text
-AST/
-```
-
----
-
-## Semantic Analysis
-
-Toda validación semántica debe implementarse en:
-
-```text
-Semantic/
-```
-
-Ejemplos:
-
-* variables no declaradas
-* redeclaraciones
-* chequeo de tipos
-* validación de returns
-* validación de funciones
-
----
-
-## LLVM
-
-La generación de código LLVM debe ubicarse en:
-
-```text
-Codegen/
-```
-
----
-
-# Recomendaciones
-
-* No modificar archivos generados por ANTLR manualmente.
-* Regenerar el parser cada vez que cambie la gramática.
-* Hacer commits pequeños y frecuentes.
-* Mantener separadas las etapas:
-
-    * Parsing
-    * AST
-    * Semantic Analysis
-    * LLVM
-
----
-
-# Tecnologías utilizadas
-
-* C#
-* .NET 8
-* ANTLR4
-* LLVM
-* Rider
-
----
-
-# Integrantes
-
-* Fabián Ricardo Vargas Araya
-* Joseh Daniel Salas Rivas
+| Herramienta | Versión | Uso |
+|---|---|---|
+| C# / .NET | 8.0 | Lenguaje de implementación |
+| ANTLR4 | 4.13.1 | Lexer y parser |
+| LLVMSharp.Interop | 20.1.2 | Generación de código x86 |
+| AvalonEdit | 6.3.1 | Editor de texto en el IDE |
+| WPF | .NET 8 | Interfaz gráfica |
+| MinGW (ld.lld) | bundled | Enlazado del objeto a ejecutable |
