@@ -88,7 +88,7 @@ public partial class MainWindow : Window
 
     private void LoadSyntaxHighlighting()
     {
-        const string xshdFile = "MiniGoHighlighting.xshd";
+        var xshdFile = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "MiniGoHighlighting.xshd");
         if (!File.Exists(xshdFile)) return;
 
         using var reader = XmlReader.Create(xshdFile);
