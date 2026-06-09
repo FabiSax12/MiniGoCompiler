@@ -41,7 +41,7 @@ singleTypeDecl		        : IDENTIFIER declType;
 funcDecl		            : funcFrontDecl block SEMICOLON;
 
 
-funcFrontDecl		        : FUNC IDENTIFIER LPAREN (funcArgDecls|/*epsilon*/) RPAREN (declType|/*epsilon*/);
+funcFrontDecl		        : FUNC IDENTIFIER LPAREN funcArgDecls? RPAREN declType?;
 
 
 funcArgDecls		        : singleVarDeclNoExps (COMMA singleVarDeclNoExps)*;
@@ -61,7 +61,7 @@ sliceDeclType		        : LBRACKET RBRACKET declType;
 arrayDeclType		        : LBRACKET INTLITERAL RBRACKET declType;
 
 
-structDeclType		        : STRUCT LBRACE (structMemDecls|/*epsilon*/) RBRACE;
+structDeclType		        : STRUCT LBRACE structMemDecls? RBRACE;
 
 
 structMemDecls	            : singleVarDeclNoExps SEMICOLON (singleVarDeclNoExps SEMICOLON)*;
@@ -127,7 +127,7 @@ literal			            : INTLITERAL
 index			            : LBRACKET expression RBRACKET;
 
 
-arguments		            : LPAREN (expressionList | /*epsilon*/) RPAREN;
+arguments		            : LPAREN expressionList? RPAREN;
 
 
 selector		            : DOT IDENTIFIER;
@@ -148,9 +148,9 @@ statementList 		        : statement* ;
 block 			            : LBRACE statementList RBRACE;
 
  
-statement		            : PRINT LPAREN (expressionList | /*epsilon*/) RPAREN SEMICOLON 
-                            | PRINTLN LPAREN (expressionList | /*epsilon*/) RPAREN SEMICOLON 
-                            | RETURN (expression | /*epsilon*/) SEMICOLON 
+statement		            : PRINT LPAREN expressionList? RPAREN SEMICOLON 
+                            | PRINTLN LPAREN expressionList? RPAREN SEMICOLON 
+                            | RETURN expression? SEMICOLON 
                             | BREAK SEMICOLON 
                             | CONTINUE SEMICOLON
                             | simpleStatement SEMICOLON 
@@ -163,10 +163,9 @@ statement		            : PRINT LPAREN (expressionList | /*epsilon*/) RPAREN SEMI
                             ;
                             
                             
-simpleStatement	            : /*epsilon*/ 
-                            | expression (INCREMENT | DECREMENT | /*epsilon*/) 
+simpleStatement	            : (expression (INCREMENT | DECREMENT)? 
                             | assignmentStatement 
-                            | expressionList DECLARE_ASSIGN expressionList
+                            | expressionList DECLARE_ASSIGN expressionList)?
                             ;
                             
                             
@@ -208,8 +207,7 @@ switch			            : SWITCH simpleStatement SEMICOLON expression LBRACE expres
                             ;
                             
                             
-expressionCaseClauseList    : /*epsilon*/ 
-			                | expressionCaseClause expressionCaseClauseList
+expressionCaseClauseList    : (expressionCaseClause expressionCaseClauseList)?
 			                ;
 			                
 			                 
